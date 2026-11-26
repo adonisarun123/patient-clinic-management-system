@@ -5,7 +5,7 @@
   "description": "Multi-tenant clinic patient management add-on (OPD core) for Monk Mantra client sites",
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=20.11"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "next dev",

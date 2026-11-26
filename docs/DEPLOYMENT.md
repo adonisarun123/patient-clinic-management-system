@@ -20,7 +20,7 @@
    `FORCE ROW LEVEL SECURITY` applies to it. Check with
    `SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;` — both must be `false`.
    On self-managed Postgres, the same steps apply (create the extensions as a superuser).
-2. Set `DATABASE_URL` (Neon **pooled** host, `-pooler`, as `clinic_app`), `DATABASE_URL_UNPOOLED` (same role, direct host — used only for migrations), `DB_POOL_MAX=5`, `CRON_SECRET`, and `APP_ENCRYPTION_KEY` (`openssl rand -base64 32`) in the host's environment. Never set `ALLOW_DEV_SMS` or `ALLOW_SANDBOX_PAYMENTS` in production.
+2. Set `DATABASE_URL` (Neon **pooled** host, `-pooler`, as `clinic_app`, with `sslmode=verify-full`), `DATABASE_URL_UNPOOLED` (same role, direct host — used only for migrations), `DB_POOL_MAX=5`, `CRON_SECRET`, and `APP_ENCRYPTION_KEY` (`openssl rand -base64 32`) in the host's environment. Never set `ALLOW_DEV_SMS` or `ALLOW_SANDBOX_PAYMENTS` in production.
 3. `npm run db:migrate`. Migrations are checksummed: an edited migration is refused, so add a new file instead.
 4. `npm run admin:create -- you@monkmantra.com "Name"` → sign in at `/admin` and onboard clinics.
 
