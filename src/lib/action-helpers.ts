@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { requireStaff } from '@/lib/session';
 import { AppError, toAppError } from '@/lib/errors';
 
+import { kickOutbox } from './outbox';
 export const s = (f: FormData, k: string) => { const v = f.get(k); return typeof v === 'string' ? v.trim() : ''; };
 export const opt = (f: FormData, k: string) => s(f, k) || undefined;
 export const num = (f: FormData, k: string) => (s(f, k) === '' ? undefined : Number(s(f, k)));
@@ -29,6 +30,7 @@ export async function run(slug: string, back: string, fn: (ctx: Awaited<ReturnTy
     }
     throw raw;
   }
+  kickOutbox(ctx.tenant.id, slug);
   revalidatePath(`/${slug}`, 'layout');
   redirect(msg ? withMsg(target, 'ok', msg) : target);
 }

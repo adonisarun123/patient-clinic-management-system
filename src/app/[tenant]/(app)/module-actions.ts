@@ -11,8 +11,15 @@ import * as rx from '@/domain/pharmacy';
 import * as ip from '@/domain/inpatient';
 import * as imp from '@/domain/importer';
 import { uploadPatientDocument, markAttachmentError } from '@/domain/attachments';
+import { readUploaded } from '@/lib/blob';
 
-async function fileFrom(f: FormData, k: string) {
+/** A file either posted with the form, or already uploaded by the browser to private object storage. */
+async function fileFrom(f: FormData, k: string, tenantId: string) {
+  const key = f.get(`${k}_key`);
+  if (typeof key === 'string' && key) {
+    const { data, contentType } = await readUploaded(tenantId, key);
+    return { filename: String(f.get(`${k}_name`) ?? 'file').slice(0, 200), contentType, data, storageKey: key };
+  }
   const v = f.get(k);
   if (!v || typeof v === 'string' || v.size === 0) return null;
   return { filename: v.name, contentType: v.type, data: Buffer.from(await v.arrayBuffer()) };
@@ -43,7 +50,7 @@ export async function orderAction(slug: string, orderId: string, f: FormData) {
     if (op === 'collect') { await labs.collect(actor, tenant, orderId, { identityConfirmed: s(f, 'idok') === 'on' }); return 'Marked collected'; }
     if (op === 'cancel') { await labs.cancelOrder(actor, tenant, orderId, s(f, 'reason')); return 'Order cancelled'; }
     if (op === 'result') {
-      const file = await fileFrom(f, 'file');
+      const file = await fileFrom(f, 'file', tenant.id);
       const r = await labs.recordResult(actor, tenant, orderId, { status: (s(f, 'status') || 'final') as 'final', valueNum: num(f, 'valueNum'), valueText: opt(f, 'valueText'),
         reportText: opt(f, 'reportText'), performingLab: opt(f, 'performingLab'), abnormal: s(f, 'abnormal') === 'on', critical: s(f, 'critical') === 'on',
         amendReason: opt(f, 'amendReason'), file: file ?? undefined });
@@ -61,7 +68,7 @@ export async function orderAction(slug: string, orderId: string, f: FormData) {
 // ------------------------------------------------------------------ documents, portal links, release
 export async function uploadDocAction(slug: string, patientId: string, f: FormData) {
   await run(slug, `/${slug}/patients/${patientId}`, async ({ actor, tenant }) => {
-    const file = await fileFrom(f, 'file');
+    const file = await fileFrom(f, 'file', tenant.id);
     if (!file) throw new AppError('VALIDATION', 'Choose a file');
     await uploadPatientDocument(actor, tenant, patientId, { ...file, title: s(f, 'title'), category: s(f, 'category'), documentDate: opt(f, 'documentDate'), source: opt(f, 'source') });
     return 'Document filed';

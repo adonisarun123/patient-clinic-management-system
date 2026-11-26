@@ -1,5 +1,6 @@
 import { getTenantBySlug } from '@/domain/tenants';
 import { handleRazorpayWebhook } from '@/domain/payments';
+import { kickOutbox } from '@/lib/outbox';
 
 /** Razorpay → Clinic Core. Signature is checked over the raw body; respond 200 quickly so Razorpay does not retry needlessly. */
 export async function POST(req: Request, ctx: { params: Promise<{ tenant: string }> }) {
@@ -10,6 +11,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ tenant: string
   if (raw.length > 512 * 1024) return new Response('too large', { status: 413 });
   try {
     const r = await handleRazorpayWebhook(tenant, raw, req.headers.get('x-razorpay-signature'));
+    if (r.ok) kickOutbox(tenant.id, slug);
     return Response.json({ received: true }, { status: r.ok ? 200 : 400 });
   } catch (e) {
     console.error('[razorpay webhook]', (e as Error).message);

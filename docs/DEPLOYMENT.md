@@ -20,7 +20,7 @@
    `FORCE ROW LEVEL SECURITY` applies to it. Check with
    `SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;` — both must be `false`.
    On self-managed Postgres, the same steps apply (create the extensions as a superuser).
-2. Set `DATABASE_URL` (with `sslmode=require`) and `APP_ENCRYPTION_KEY` (`openssl rand -base64 32`) in the host's environment. Never set `ALLOW_DEV_SMS` or `ALLOW_SANDBOX_PAYMENTS` in production.
+2. Set `DATABASE_URL` (Neon **pooled** host, `-pooler`, as `clinic_app`), `DATABASE_URL_UNPOOLED` (same role, direct host — used only for migrations), `DB_POOL_MAX=5`, `CRON_SECRET`, and `APP_ENCRYPTION_KEY` (`openssl rand -base64 32`) in the host's environment. Never set `ALLOW_DEV_SMS` or `ALLOW_SANDBOX_PAYMENTS` in production.
 3. `npm run db:migrate`. Migrations are checksummed: an edited migration is refused, so add a new file instead.
 4. `npm run admin:create -- you@monkmantra.com "Name"` → sign in at `/admin` and onboard clinics.
 
@@ -42,3 +42,19 @@
 - `npm run sync` — pull (rebase, autostash) from `origin/main`, then push local commits. Never force-pushes. On a conflict it aborts cleanly and exits non-zero.
 - `bash scripts/install-autosync-macos.sh` — installs a LaunchAgent that runs the sync every 5 minutes (`SYNC_MINUTES=…` to change). Add `AUTO_COMMIT=1` to also commit local edits automatically. Remove it with `--uninstall`. Log: `~/Library/Logs/clinic-core-gitsync.log`.
 - GitHub → local is covered by the pull; local → GitHub by the push. Edits made directly on GitHub arrive at the next run.
+
+
+## Vercel specifics
+- `vercel.json` pins functions to `sin1` (next to the Neon Singapore database) and runs `npm run db:migrate` before
+  `next build` on **production** deployments only. Migrations run as `clinic_app`, so it owns every table and
+  `FORCE ROW LEVEL SECURITY` applies to it.
+- **Files** go to a **private** Vercel Blob store. Browsers upload directly to the store (the 4.5 MB function body limit
+  does not apply); the server reads the object back, checks the file signature, size and chart access, and stores
+  only the key. Downloads stream through the app's access check. Needs `BLOB_READ_WRITE_TOKEN` (added when the store
+  is connected with a read-write token). Without it, files are stored in the database (local/dev/tests).
+- **Webhooks** are delivered right after the request that created them (Next.js `after`), and `/api/cron/outbox`
+  (Vercel Cron, every minute, `Authorization: Bearer $CRON_SECRET`) retries failures and releases expired holds.
+  Per-minute cron needs the Pro plan; on Hobby, change the schedule to daily — immediate delivery still works,
+  only retries slow down.
+- CSV imports go through a server action, so a single CSV must be under ~4 MB on Vercel (≈25,000 patient rows);
+  split larger files.

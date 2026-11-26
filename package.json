@@ -20,6 +20,7 @@
     "sync": "bash scripts/git-sync.sh"
   },
   "dependencies": {
+    "@vercel/blob": "^2.9.0",
     "bcryptjs": "^3.0.3",
     "next": "^16.4.6",
     "pg": "^8.23.1",

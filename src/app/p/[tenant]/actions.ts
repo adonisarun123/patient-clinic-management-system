@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { AppError, toAppError } from '@/lib/errors';
 import { rateLimit } from '@/lib/http';
 import { portalCookie, pendingCookie, portalTenant, requirePortal } from '@/lib/portal-session';
+import { kickOutbox } from '@/lib/outbox';
 import * as portal from '@/domain/portal';
 import * as pay from '@/domain/payments';
 import * as tele from '@/domain/telemedicine';
@@ -53,6 +54,7 @@ export async function cancelVisit(slug: string, patientId: string, f: FormData) 
   const { tenant, s } = await requirePortal(slug);
   let r = `/p/${slug}/patient/${patientId}?ok=Appointment+cancelled`;
   try { await portal.portalCancel(tenant, s, str(f, 'appointmentId')); } catch (e) { r = `/p/${slug}/patient/${patientId}?err=${encodeURIComponent(msg(e))}`; }
+  kickOutbox((await portalTenant(slug)).id, slug);
   redirect(r);
 }
 
@@ -74,6 +76,7 @@ export async function requestRecords(slug: string, patientId: string, f: FormDat
       authorityNote: `Portal account linked as ${link.relation}`, requestType: (str(f, 'requestType') || 'copy') as 'copy', scope: str(f, 'scope'), delivery: 'portal' }, 'portal');
     r = `/p/${slug}/patient/${patientId}?ok=${encodeURIComponent(`Request ${c.caseNo} received`)}`;
   } catch (e) { r = `/p/${slug}/patient/${patientId}?err=${encodeURIComponent(msg(e))}`; }
+  kickOutbox((await portalTenant(slug)).id, slug);
   redirect(r);
 }
 
@@ -88,6 +91,7 @@ export async function bookVisit(slug: string, patientId: string, f: FormData) {
     const a = await confirmAppointment(actor, tenant, { holdId: h.holdId, patientId, source: 'portal' }, `portal-${h.holdId}`);
     r = `/p/${slug}/patient/${patientId}?ok=${encodeURIComponent(`Booked ${a.bookingRef}`)}`;
   } catch (e) { r = `/p/${slug}/book/${patientId}?err=${encodeURIComponent(msg(e))}`; }
+  kickOutbox((await portalTenant(slug)).id, slug);
   redirect(r);
 }
 

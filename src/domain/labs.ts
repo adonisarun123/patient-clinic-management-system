@@ -124,7 +124,7 @@ export const resultInput = z.object({
   valueNum: z.number().optional(), valueText: z.string().max(4000).optional(), reportText: z.string().max(20000).optional(),
   performingLab: z.string().max(200).optional(), abnormal: z.boolean().optional(), critical: z.boolean().optional(),
   amendReason: z.string().max(500).optional(),
-  file: z.object({ filename: z.string(), contentType: z.string(), data: z.instanceof(Buffer) }).optional(),
+  file: z.object({ filename: z.string(), contentType: z.string(), data: z.instanceof(Buffer), storageKey: z.string().nullish() }).optional(),
 });
 
 function flagFor(t: LabTest, v: number | undefined, manualAbnormal?: boolean, manualCritical?: boolean) {
@@ -159,7 +159,7 @@ export async function recordResult(actor: Actor, tenant: Tenant, orderId: string
     const f = flagFor(t, p.valueNum, p.abnormal, p.critical);
     let attachmentId: string | null = null;
     if (p.file) attachmentId = await storeAttachment(tx, actor, { patientId: o.patient_id, entityKind: 'result', entityId: orderId, category: 'lab_report',
-      title: `${t.name} report`, filename: p.file.filename, contentType: p.file.contentType, data: p.file.data, source: p.performingLab });
+      title: `${t.name} report`, filename: p.file.filename, contentType: p.file.contentType, data: p.file.data, storageKey: p.file.storageKey, source: p.performingLab });
     const status = prev && (prev.status === 'final' || prev.status === 'amended') ? 'amended' : p.status;
     const fmt = (x: string | null) => (x == null ? '' : String(Number(x)));
     const refRange = t.ref_text ?? (t.ref_low != null || t.ref_high != null ? `${fmt(t.ref_low)}–${fmt(t.ref_high)}` : null);

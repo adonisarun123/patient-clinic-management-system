@@ -205,7 +205,7 @@ export async function portalDocument(tenant: Tenant, s: PortalSession, kind: str
     await tx.exec(`INSERT INTO audit_event (tenant_id, actor_kind, actor_id, action, entity_kind, entity_id, patient_id) VALUES (app_tenant_id(), 'public', $1, 'portal.document_viewed', $2, $3, $4)`,
       [`portal:${s.accountId}`, kind, docId, rel.patient_id]);
     if (kind === 'prescription') return { kind, rx: await tx.one<{ snapshot: Record<string, unknown>; status: string; content_digest: string }>(`SELECT snapshot, status, content_digest FROM prescription WHERE id = $1`, [docId]) };
-    if (kind === 'attachment') return { kind, file: await tx.one<{ filename: string; content_type: string; data: Buffer }>(`SELECT filename, content_type, data FROM attachment WHERE id = $1 AND status = 'active'`, [docId]) };
+    if (kind === 'attachment') return { kind, file: await tx.one<{ filename: string; content_type: string; data: Buffer | null; storage_key: string | null }>(`SELECT filename, content_type, data, storage_key FROM attachment WHERE id = $1 AND status = 'active'`, [docId]) };
     if (kind === 'result') return { kind, result: await tx.one<Record<string, unknown>>(
       `SELECT t.name, trim_scale(v.value_num) AS value_num, v.value_text, v.unit, v.ref_range, v.flag, v.report_text, v.status, v.verified_at, v.attachment_id
          FROM service_order o JOIN lab_test t ON t.id = o.test_id JOIN LATERAL (SELECT * FROM result_version WHERE order_id = o.id ORDER BY version_no DESC LIMIT 1) v ON true WHERE o.id = $1`, [docId]) };

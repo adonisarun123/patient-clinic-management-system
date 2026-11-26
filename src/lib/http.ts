@@ -6,6 +6,7 @@ import { getTenantBySlug, resolveApiKey, type Tenant } from '@/domain/tenants';
 import { sessionFromToken } from '@/domain/staff';
 import type { Actor } from './actor';
 
+import { kickOutbox } from './outbox';
 export const sessionCookie = (slug: string) => `cc_sess_${slug.replace(/-/g, '_')}`;
 
 export function clientIp(req: Request): string {
@@ -133,7 +134,13 @@ type Params<P> = { params: Promise<P> };
 export function route<P extends { tenant: string }>(fn: (req: Request, p: P) => Promise<Response>) {
   return async (req: Request, ctx: Params<P>) => {
     try {
-      return await fn(req, await ctx.params);
+      const p = await ctx.params;
+      const res = await fn(req, p);
+      if (req.method !== 'GET' && res.ok) {
+        const t = await getTenantBySlug(p.tenant).catch(() => null);
+        if (t) kickOutbox(t.id, p.tenant);
+      }
+      return res;
     } catch (e) {
       return fail(e);
     }

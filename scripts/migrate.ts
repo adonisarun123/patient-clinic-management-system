@@ -5,7 +5,8 @@ import { Client } from 'pg';
 import { sha256 } from '../src/lib/crypto';
 
 async function main() {
-  const url = process.env.DATABASE_URL;
+  // Migrations need a direct (session) connection; on Neon use the non-pooled URL when it is provided.
+  const url = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not set');
   const client = new Client({ connectionString: url, ssl: /sslmode=require|neon\.tech/.test(url) ? { rejectUnauthorized: true } : undefined });
   await client.connect();

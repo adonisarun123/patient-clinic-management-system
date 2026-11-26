@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["sin1"],
+  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then npm run db:migrate; fi && next build",
+  "crons": [{ "path": "/api/cron/outbox", "schedule": "* * * * *" }]
+}

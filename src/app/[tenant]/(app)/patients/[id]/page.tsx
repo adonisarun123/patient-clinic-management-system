@@ -12,6 +12,8 @@ import { patientPortalLinks, releasedIds } from '@/domain/portal';
 import { patientOrders } from '@/domain/labs';
 import { patientDispenses } from '@/domain/pharmacy';
 import { BreakGlass } from '@/components/BreakGlass';
+import { FileField } from '@/components/FileField';
+import { objectStorageEnabled } from '@/lib/blob';
 import { needsBreakGlass } from '@/lib/gate';
 import { uploadDocAction, docErrorAction, portalLinkAction, restrictAction, releaseAction, returnAction } from '../../module-actions';
 import { allergyAction, allergyStatusAction, confirmIdentityAction, linkPatientAction, updatePatientAction, walkInAction, followUpAction } from '../../actions';
@@ -233,7 +235,7 @@ export default async function PatientChart({ params, searchParams }: { params: P
                 {d.status === 'active' && can(session.role, 'patient.merge') && <details><summary className="small">Entered in error</summary><form action={docErrorAction.bind(null, slug, id, d.id)} className="inline-form"><input name="reason" required placeholder="Reason" /><button className="btn small">Mark</button></form></details>}</td></tr>))}</tbody></table>}
           {can(session.role, 'patient.write') && (
             <form action={uploadDocAction.bind(null, slug, id)} className="inline-form wrap" encType="multipart/form-data">
-              <input type="file" name="file" accept="application/pdf,image/jpeg,image/png" required />
+              <FileField name="file" slug={slug} tenantId={tenant.id} objectStorage={objectStorageEnabled()} accept="application/pdf,image/jpeg,image/png" required label="Document file" />
               <input name="title" placeholder="Title (e.g. MRI knee report)" required />
               <select name="category"><option value="outside_report">Outside report</option><option value="discharge_summary">Old discharge summary</option><option value="imaging">Imaging</option><option value="referral">Referral letter</option><option value="consent">Signed consent</option><option value="id_document">ID document</option><option value="other">Other</option></select>
               <input type="date" name="documentDate" title="Date on the document" /><input name="source" placeholder="Source (hospital / lab)" />

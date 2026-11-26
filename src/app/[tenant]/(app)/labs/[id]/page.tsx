@@ -6,6 +6,8 @@ import { can } from '@/lib/rbac';
 import { fmtDateTime, label } from '@/lib/format';
 import { Badge, Flash, PageHead } from '@/components/ui';
 import { orderAction } from '../../module-actions';
+import { FileField } from '@/components/FileField';
+import { objectStorageEnabled } from '@/lib/blob';
 
 export default async function LabOrder({ params, searchParams }: { params: Promise<{ tenant: string; id: string }>; searchParams: Promise<{ ok?: string; err?: string }> }) {
   const { tenant: slug, id } = await params;
@@ -53,7 +55,7 @@ export default async function LabOrder({ params, searchParams }: { params: Promi
           <label>Status<select name="status"><option value="final">Final</option><option value="preliminary">Preliminary</option></select></label>
           <label className="span2">Report / impression<textarea name="reportText" rows={4} /></label>
           <label>Performing laboratory<input name="performingLab" defaultValue={o.destination === 'external' ? o.external_lab ?? '' : tenant.name} /></label>
-          <label>Report file (PDF/JPEG/PNG, ≤10 MB)<input type="file" name="file" accept="application/pdf,image/jpeg,image/png" /></label>
+          <label>Report file (PDF/JPEG/PNG, ≤10 MB)<FileField name="file" slug={slug} tenantId={tenant.id} objectStorage={objectStorageEnabled()} accept="application/pdf,image/jpeg,image/png" /></label>
           <label className="check"><input type="checkbox" name="abnormal" /> Abnormal</label>
           <label className="check"><input type="checkbox" name="critical" /> Critical — needs immediate clinician acknowledgement</label>
           {latest && <label className="span2">Reason for amendment (required)<input name="amendReason" required /></label>}
