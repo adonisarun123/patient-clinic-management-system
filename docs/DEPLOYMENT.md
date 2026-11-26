@@ -6,7 +6,20 @@
 - **Worker**: `npm run worker` as a long-running process (Railway, Fly, Render or a small VM), **or** `npm run worker -- --once` on a 1-minute cron. It delivers webhooks and cleans up expired holds. Booking correctness does not depend on it running.
 
 ## First deployment
-1. Create the database. On Neon the default owner role is fine (it is not a superuser and has no `BYPASSRLS`). On self-managed Postgres, create the `pgcrypto` and `btree_gist` extensions as a superuser first.
+1. Create the database and a dedicated app role. **On Neon, never run the app as `neondb_owner` or any role created
+   in the Neon console, CLI or API** — those are members of `neon_superuser`, which has `BYPASSRLS`, so tenant isolation
+   would silently switch off. Create the role with SQL instead (roles created by SQL get no `neon_superuser` membership).
+   Connected as the owner role:
+   ```sql
+   CREATE EXTENSION IF NOT EXISTS pgcrypto;
+   CREATE EXTENSION IF NOT EXISTS btree_gist;
+   CREATE ROLE clinic_app LOGIN PASSWORD '<long random password>';   -- no BYPASSRLS, not superuser
+   GRANT CREATE ON SCHEMA public TO clinic_app;
+   ```
+   Then use `clinic_app` in `DATABASE_URL` for both `npm run db:migrate` and the app, so it owns the tables and
+   `FORCE ROW LEVEL SECURITY` applies to it. Check with
+   `SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;` — both must be `false`.
+   On self-managed Postgres, the same steps apply (create the extensions as a superuser).
 2. Set `DATABASE_URL` (with `sslmode=require`) and `APP_ENCRYPTION_KEY` (`openssl rand -base64 32`) in the host's environment. Never set `ALLOW_DEV_SMS` or `ALLOW_SANDBOX_PAYMENTS` in production.
 3. `npm run db:migrate`. Migrations are checksummed: an edited migration is refused, so add a new file instead.
 4. `npm run admin:create -- you@monkmantra.com "Name"` → sign in at `/admin` and onboard clinics.
