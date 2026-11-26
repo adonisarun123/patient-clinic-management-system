@@ -58,3 +58,15 @@
   only retries slow down.
 - CSV imports go through a server action, so a single CSV must be under ~4 MB on Vercel (≈25,000 patient rows);
   split larger files.
+
+## Optional services (off until configured)
+
+| Variable | Purpose |
+|---|---|
+| `CLAMAV_HOST`, `CLAMAV_PORT` (3310), `CLAMAV_TLS=1`, `CLAMAV_TIMEOUT_MS` | Virus-scan every upload through clamd INSTREAM. Use TLS (e.g. stunnel) unless clamd is on a private network |
+| `CLAMAV_FAIL_OPEN=1` | Accept (and flag) uploads when the scanner is down. Default is to refuse them |
+| `ABDM_CLIENT_ID`, `ABDM_CLIENT_SECRET` | NHA integrator credentials. Without them all ABDM features stay off |
+| `ABDM_GATEWAY_URL` (default sandbox `https://dev.abdm.gov.in/api/hiecm`), `ABDM_CM_ID` (default `sbx`) | Switch to production only after certification |
+
+Modules added in this release, all off by default per clinic (Settings › Modules): **Day care**, **Operating theatre**. Theatre and
+formulary data must be reviewed by the clinic’s surgical, anaesthesia and pharmacy leads before go-live.
