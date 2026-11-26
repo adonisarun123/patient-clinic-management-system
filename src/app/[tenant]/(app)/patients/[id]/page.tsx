@@ -21,9 +21,11 @@ import { listPayers, patientPolicies, listPreauths } from '@/domain/insurance';
 import { insuranceAction } from '../../insurance-actions';
 import { money } from '@/lib/format';
 import { uploadDocAction, docErrorAction, portalLinkAction, restrictAction, releaseAction, returnAction } from '../../module-actions';
+import { mergeAction, refileAction } from '../../records-actions';
+import { listMerges } from '@/domain/records';
 import { allergyAction, allergyStatusAction, confirmIdentityAction, linkPatientAction, updatePatientAction, walkInAction, followUpAction } from '../../actions';
 
-type Sp = { ok?: string; err?: string; edit?: string; link?: string };
+type Sp = { dup?: string; ok?: string; err?: string; edit?: string; link?: string };
 
 export default async function PatientChart({ params, searchParams }: { params: Promise<{ tenant: string; id: string }>; searchParams: Promise<Sp> }) {
   const { tenant: slug, id } = await params;
@@ -45,6 +47,8 @@ export default async function PatientChart({ params, searchParams }: { params: P
   const dispenses = m.pharmacy && t && can(session.role, 'pharmacy.dispense') ? await patientDispenses(tenant.id, id) : [];
   const history = sp.edit ? await patientHistory(actor, id) : [];
   const cat = await listCatalog(tenant.id);
+  const dupResults = sp.dup && can(session.role, 'patient.merge') ? (await searchPatients(actor, sp.dup)).filter((r) => r.id !== id && r.status !== 'merged') : [];
+  const mergeLog = can(session.role, 'patient.merge') ? await listMerges(actor, tenant, { patientId: id }) : [];
   const linkResults = sp.link ? (await searchPatients(actor, sp.link)).filter((r) => r.id !== id && r.status !== 'merged') : [];
   const activeAllergies = (t?.allergies ?? []).filter((a) => (a as { status: string }).status === 'active') as { id: string; substance: string; reaction: string | null; severity: string | null }[];
   const back = `/${slug}/patients/${id}`;
@@ -297,6 +301,8 @@ export default async function PatientChart({ params, searchParams }: { params: P
               <td>{m.portal && d.status === 'active' && (
                 <form action={releaseAction.bind(null, slug, back)} className="inline-form"><input type="hidden" name="patientId" value={id} /><input type="hidden" name="kind" value="attachment" /><input type="hidden" name="docId" value={d.id} />
                   {isReleased('attachment', d.id) ? <><input type="hidden" name="op" value="revoke" /><span className="pill ok">In portal</span><button className="btn small">Remove</button></> : <button className="btn small">Release</button>}</form>)}
+                {d.scan_status === 'error_accepted' && <div className="scan-flag">Not virus-scanned ({d.scan_detail})</div>}
+                {d.status === 'active' && can(session.role, 'patient.merge') && ['patient_document', 'import'].includes(d.entity_kind) && <details><summary className="small">Move to another chart</summary><form action={refileAction.bind(null, slug)} className="inline-form wrap"><input type="hidden" name="op" value="request" /><input type="hidden" name="attachmentId" value={d.id} /><input type="hidden" name="back" value={back} /><input name="toUhid" required placeholder="Correct patient's UHID" /><input name="reason" required minLength={5} placeholder="How you know" /><button className="btn small">Request move</button></form></details>}
                 {d.status === 'active' && can(session.role, 'patient.merge') && <details><summary className="small">Entered in error</summary><form action={docErrorAction.bind(null, slug, id, d.id)} className="inline-form"><input name="reason" required placeholder="Reason" /><button className="btn small">Mark</button></form></details>}</td></tr>))}</tbody></table>}
           {can(session.role, 'patient.write') && (
             <form action={uploadDocAction.bind(null, slug, id)} className="inline-form wrap" encType="multipart/form-data">
@@ -305,6 +311,20 @@ export default async function PatientChart({ params, searchParams }: { params: P
               <select name="category"><option value="outside_report">Outside report</option><option value="discharge_summary">Old discharge summary</option><option value="imaging">Imaging</option><option value="referral">Referral letter</option><option value="consent">Signed consent</option><option value="id_document">ID document</option><option value="other">Other</option></select>
               <input type="date" name="documentDate" title="Date on the document" /><input name="source" placeholder="Source (hospital / lab)" />
               <button className="btn small">Upload</button></form>)}
+        </div>)}
+
+      {can(session.role, 'patient.merge') && p.status !== 'merged' && (
+        <div className="card"><h2>Duplicate charts</h2>
+          <p className="small muted">If this person has a second chart, merge it into this one. A second authorised person approves, and the merge can be undone from the records desk.</p>
+          <form className="search"><input name="dup" defaultValue={sp.dup} placeholder="Search the duplicate by name, phone or UHID" /><button className="btn">Find</button></form>
+          {dupResults.map((r) => (
+            <form key={r.id} action={mergeAction.bind(null, slug)} className="link-row">
+              <input type="hidden" name="op" value="request" /><input type="hidden" name="sourceId" value={r.id} /><input type="hidden" name="survivorId" value={id} /><input type="hidden" name="back" value={back} />
+              <span><b>{r.full_name}</b> · {r.uhid} · DOB {birthLabel(r.birth_date, r.birth_precision)}</span>
+              <input name="reason" required minLength={5} placeholder="Evidence (e.g. name, DOB and phone confirmed with the patient)" />
+              <button className="btn">Merge into this chart</button>
+            </form>))}
+          {mergeLog.length > 0 && <p className="small">History: {mergeLog.map((x) => `${x.source_uhid} → ${x.survivor_uhid} (${label(x.status)})`).join(' · ')} — <Link href={`/${slug}/records`}>records desk</Link></p>}
         </div>)}
 
       {m.portal && can(session.role, 'portal.manage') && (

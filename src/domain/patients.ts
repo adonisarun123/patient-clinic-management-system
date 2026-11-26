@@ -5,6 +5,7 @@ import { authorize, actorId, staffId, type Actor } from '@/lib/actor';
 import { audit, emit } from '@/lib/events';
 import { idempotent } from '@/lib/idempotency';
 import { normalizeName, normalizePhone } from '@/lib/identity';
+import { executeMerge } from './records';
 import type { Tenant } from './tenants';
 
 export type Patient = {
@@ -280,24 +281,9 @@ export async function linkIntoExisting(actor: Actor, tenant: Tenant, sourceId: s
     if (!tenant.settings.soloPractice && actor.kind === 'staff' && src.created_by === actor.staffId) {
       throw rule('A second authorised person must confirm this link (dual control).');
     }
-    // Signed clinical and posted financial facts keep their original patient reference; chart reads
-    // follow the alias (see chartIds). Only open, forward-looking work moves to the survivor.
-    const moved: Record<string, number> = {
-      appointment: await tx.exec(`UPDATE appointment SET patient_id = $2 WHERE patient_id = $1 AND state IN ('booked','arrived')`, [sourceId, survivorId]),
-      queue_ticket: await tx.exec(`UPDATE queue_ticket SET patient_id = $2 WHERE patient_id = $1 AND status IN ('waiting','called','in_room')`, [sourceId, survivorId]),
-      follow_up: await tx.exec(`UPDATE follow_up SET patient_id = $2 WHERE patient_id = $1 AND status = 'open'`, [sourceId, survivorId]),
-      charge_item: await tx.exec(`UPDATE charge_item SET patient_id = $2 WHERE patient_id = $1 AND status = 'unbilled'`, [sourceId, survivorId]),
-      allergy: await tx.exec(`UPDATE allergy SET patient_id = $2 WHERE patient_id = $1`, [sourceId, survivorId]),
-    };
-    if (moved.allergy > 0) {
-      await tx.exec(`UPDATE patient SET allergy_status = 'has_allergies' WHERE id = $1 AND EXISTS (SELECT 1 FROM allergy WHERE patient_id = $1 AND status = 'active')`, [survivorId]);
-    }
-    await tx.exec(`UPDATE patient SET status='merged', merged_into_id=$2, version=version+1, updated_at=now() WHERE id=$1`, [sourceId, survivorId]);
-    await tx.exec(`INSERT INTO patient_change (tenant_id, patient_id, field, old_value, new_value, kind, reason, actor_id)
-                   VALUES (app_tenant_id(), $1, 'identity', $2, $3, 'merge', $4, $5), (app_tenant_id(), $3::uuid, 'identity', $2, $3, 'link', $4, $5)`,
-      [sourceId, src.uhid, survivorId, reason, staffId(actor)]);
-    await audit(tx, actor, 'patient.linked', 'patient', survivorId, { patientId: survivorId, reason, data: { from: src.uhid, to: dst.uhid, moved } });
-    return { survivor: dst.uhid, retired: src.uhid, moved };
+    // Shared engine: open work moves, signed facts stay and are read through the alias; recorded for undo.
+    const r = await executeMerge(tx, actor, src, dst, reason.trim(), { requestedBy: src.created_by });
+    return { survivor: r.survivor, retired: r.retired, moved: r.moved, mergeId: r.mergeId };
   });
 }
 

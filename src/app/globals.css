@@ -148,3 +148,8 @@ tr.highlight td { background: #ecfdf5; }
 .warn-text { color: #b45309; font-weight: 600; }
 .safety-panel { border: 1px solid #fcd34d; background: #fffbeb; border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
 .safety-panel ul { margin: 6px 0; padding-left: 4px; list-style: none; } .safety-panel li { margin: 3px 0; } .safety-panel .sev-block { color: #991b1b; font-weight: 600; } .safety-panel .sev-info { color: var(--muted); }
+/* print layouts & records tools */
+.sig-line { margin: 36px 0 8px auto; text-align: right; border-top: 1px solid #94a3b8; padding-top: 4px; width: 220px; }
+.tiny { font-size: 10px; } .print-foot::after { content: ''; display: block; clear: both; }
+.layout-preview { border: 1px dashed var(--border); border-radius: var(--radius); padding: 12px; background: #fff; }
+.scan-flag { color: var(--danger); font-size: 12px; }

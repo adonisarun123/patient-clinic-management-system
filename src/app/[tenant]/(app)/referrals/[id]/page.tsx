@@ -8,6 +8,8 @@ import { fmtDate, fmtDateTime, label } from '@/lib/format';
 import { birthLabel } from '@/lib/identity';
 import { Flash, PageHead } from '@/components/ui';
 import { PrintButton } from '@/components/PrintButton';
+import { PrintLayoutStyle, HeaderLines, LayoutFooter } from '@/components/PrintLayout';
+import { currentLayout } from '@/domain/records';
 import { referralAction } from '../../frontdesk-actions';
 
 export default async function ReferralPage({ params, searchParams }: { params: Promise<{ tenant: string; id: string }>; searchParams: Promise<{ ok?: string; err?: string }> }) {
@@ -22,6 +24,7 @@ export default async function ReferralPage({ params, searchParams }: { params: P
       `SELECT id, booking_ref, lower(period) AS start_at FROM appointment WHERE patient_id = $1 AND state IN ('booked','arrived','in_service','completed') ORDER BY lower(period) DESC LIMIT 10`, [r.patient_id]))
     : [];
   const here = `/${slug}/referrals/${id}`;
+  const pl = await currentLayout(actor, tenant, 'referral');
   const canSign = can(session.role, 'clinical.sign') && !!session.clinicianId;
   const closed = ['completed', 'declined', 'cancelled'].includes(r.status);
   return (
@@ -43,8 +46,9 @@ export default async function ReferralPage({ params, searchParams }: { params: P
         </form>
       ) : null}
 
-      <article className="card letter">
-        <header className="letter-head"><h2>{tenant.name}</h2><p className="small">{r.direction === 'outbound' ? 'Referral letter' : 'Referral received'} · {r.ref_number} · {fmtDate(r.signed_at ?? r.created_at, tenant)}</p></header>
+      <article className="card letter pl-rf">
+        <PrintLayoutStyle layout={pl.layout} scope="pl-rf" /><div className="pp-top" />
+        <header className="letter-head print-head"><div><h2>{tenant.name}</h2><HeaderLines layout={pl.layout} /></div></header><header className="letter-head"><p className="small">{r.direction === 'outbound' ? 'Referral letter' : 'Referral received'} · {r.ref_number} · {fmtDate(r.signed_at ?? r.created_at, tenant)}</p></header>
         <p><b>{r.direction === 'outbound' ? 'To' : 'From'}:</b> {r.referrer_name ? `${r.referrer_name}${r.referrer_specialty ? `, ${r.referrer_specialty}` : ''}${r.referrer_org ? `, ${r.referrer_org}` : ''}` : r.to_specialty ? `Consultant, ${r.to_specialty}` : '—'}</p>
         <p><b>Patient:</b> {p.full_name} · {p.uhid} · {p.sex ?? ''} · DOB {birthLabel(p.birth_date, p.birth_precision)}</p>
         <p><b>Urgency:</b> {label(r.urgency)}</p>
@@ -54,6 +58,7 @@ export default async function ReferralPage({ params, searchParams }: { params: P
           ? <footer className="signature"><p>{r.clinician_name}{r.qualification ? `, ${r.qualification}` : ''}</p><p className="small">Reg. {r.registration_number}{r.registration_council ? ` (${r.registration_council})` : ''} · Signed electronically {fmtDateTime(r.signed_at, tenant)}</p></footer>
           : <p className="flash warn no-print">Draft — not signed.</p>)}
         {r.outcome_notes && <p className="small muted prewrap no-print">{r.outcome_notes}</p>}
+        <footer className="print-foot"><LayoutFooter layout={pl.layout} version={pl.version} /></footer>
       </article>
 
       <div className="card no-print row-actions">

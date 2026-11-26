@@ -19,6 +19,7 @@ const NAV: { href: string; label: string; perm: Permission; module?: ModuleName 
   { href: '/inpatient', label: 'Inpatient', perm: 'schedule.read', module: 'inpatient' },
   { href: '/pharmacy', label: 'Pharmacy', perm: 'pharmacy.dispense', module: 'pharmacy' },
   { href: '/formulary', label: 'Formulary', perm: 'clinical.read' },
+  { href: '/records', label: 'Records desk', perm: 'patient.merge' },
   { href: '/billing', label: 'Billing', perm: 'billing.read' },
   { href: '/insurance', label: 'Insurance', perm: 'claims.manage' },
   { href: '/reports', label: 'Reports', perm: 'reports.read' },

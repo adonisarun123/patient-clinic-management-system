@@ -7,6 +7,7 @@ import { canonicalJson, sha256 } from '@/lib/crypto';
 import { financialYear } from '@/lib/money';
 import { chartIds } from './patients';
 import { assertChartAccess } from './access';
+import { activeLayout } from './records';
 import type { Tenant } from './tenants';
 import { checkLines } from './safety';
 
@@ -276,6 +277,7 @@ export async function signPrescription(actor: Actor, tenant: Tenant, rxId: strin
     const snapshot = {
       rxNumber, version: rx.version_no, issuedAt: new Date().toISOString(), timezone: tenant.timezone,
       facility: { name: tenant.name, ...tenant.branding },
+      printLayout: await activeLayout(tx, 'prescription'),
       patient: { uhid: patient.uhid, name: patient.full_name, sex: patient.sex, birthDate: patient.birth_date, birthPrecision: patient.birth_precision,
         estimatedAgeYears: patient.estimated_age_years, ageAsOf: patient.age_as_of },
       allergies: patient.allergy_status === 'no_known_allergies' ? 'No known allergies' : patient.allergy_status === 'not_reviewed' ? 'Not reviewed' : allergies,
