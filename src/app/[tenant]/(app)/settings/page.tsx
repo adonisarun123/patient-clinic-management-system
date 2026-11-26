@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { requireStaff } from '@/lib/session';
 import { listCatalog, listSchedules } from '@/domain/catalog';
-import { listIntegrations, MODULES, MODULE_LABEL } from '@/domain/tenants';
+import { listIntegrations, MODULES, MODULE_LABEL, getTenantBySlug } from '@/domain/tenants';
+import { abdmConfigured, abdmEnvironment } from '@/lib/abdm';
+import { abdmSettingsAction } from '../abdm-actions';
 import { withTenant } from '@/lib/db';
 import { gatewayActivity } from '@/domain/payments';
 import { listStaff } from '@/domain/staff';
@@ -242,7 +244,27 @@ async function Website({ slug, tenantId, host }: { slug: string; tenantId: strin
           <select name="events" multiple size={4}>{EVENT_TYPES.map((e) => <option key={e} value={e}>{e}</option>)}</select>
           <label className="check"><input type="checkbox" name="includeContact" /> Include patient name and phone (needed for WhatsApp/SMS reminders)</label>
           <button className="btn small primary">Add webhook</button></form></div>
+      <Abdm slug={slug} />
     </>
+  );
+}
+
+async function Abdm({ slug }: { slug: string }) {
+  const t = await getTenantBySlug(slug);
+  const fac = t.settings.abdmFacility ?? {};
+  const env = abdmEnvironment();
+  const back = `/${slug}/settings?tab=website`;
+  return (
+    <div className="card"><h2>ABDM (Ayushman Bharat Digital Mission)</h2>
+      <p className="small">Staff can record a patient’s ABHA number or address on the chart today, with the patient’s consent and how it was checked.
+        Verifying ABHA, linking records and sharing them through ABDM need this clinic registered in the Health Facility Registry and NHA-approved
+        integrator credentials; until then those features stay off.</p>
+      <p className="small">Gateway: {abdmConfigured() ? <b>credentials set ({env.sandbox ? 'sandbox' : 'production'})</b> : <b>not connected</b>}</p>
+      <form action={abdmSettingsAction.bind(null, slug)} className="inline-form wrap"><input type="hidden" name="op" value="facility" /><input type="hidden" name="back" value={back} />
+        <input name="hfrId" defaultValue={fac.hfrId ?? ''} placeholder="HFR facility ID" /><input name="hipId" defaultValue={fac.hipId ?? ''} placeholder="HIP ID" />
+        <button className="btn small">Save</button></form>
+      {abdmConfigured() && <form action={abdmSettingsAction.bind(null, slug)}><input type="hidden" name="op" value="test" /><input type="hidden" name="back" value={back} /><button className="btn small">Test gateway connection</button></form>}
+    </div>
   );
 }
 

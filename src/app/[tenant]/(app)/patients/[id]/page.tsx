@@ -23,9 +23,11 @@ import { money } from '@/lib/format';
 import { uploadDocAction, docErrorAction, portalLinkAction, restrictAction, releaseAction, returnAction } from '../../module-actions';
 import { mergeAction, refileAction } from '../../records-actions';
 import { listMerges } from '@/domain/records';
+import { patientAbha, formatAbhaNumber, maskAbhaNumber } from '@/domain/abha';
+import { abhaAction } from '../../abdm-actions';
 import { allergyAction, allergyStatusAction, confirmIdentityAction, linkPatientAction, updatePatientAction, walkInAction, followUpAction } from '../../actions';
 
-type Sp = { dup?: string; ok?: string; err?: string; edit?: string; link?: string };
+type Sp = { showAbha?: string; dup?: string; ok?: string; err?: string; edit?: string; link?: string };
 
 export default async function PatientChart({ params, searchParams }: { params: Promise<{ tenant: string; id: string }>; searchParams: Promise<Sp> }) {
   const { tenant: slug, id } = await params;
@@ -48,6 +50,7 @@ export default async function PatientChart({ params, searchParams }: { params: P
   const history = sp.edit ? await patientHistory(actor, id) : [];
   const cat = await listCatalog(tenant.id);
   const dupResults = sp.dup && can(session.role, 'patient.merge') ? (await searchPatients(actor, sp.dup)).filter((r) => r.id !== id && r.status !== 'merged') : [];
+  const abha = p.status !== 'merged' ? await patientAbha(actor, tenant, id) : null;
   const mergeLog = can(session.role, 'patient.merge') ? await listMerges(actor, tenant, { patientId: id }) : [];
   const linkResults = sp.link ? (await searchPatients(actor, sp.link)).filter((r) => r.id !== id && r.status !== 'merged') : [];
   const activeAllergies = (t?.allergies ?? []).filter((a) => (a as { status: string }).status === 'active') as { id: string; substance: string; reaction: string | null; severity: string | null }[];
@@ -312,6 +315,25 @@ export default async function PatientChart({ params, searchParams }: { params: P
               <input type="date" name="documentDate" title="Date on the document" /><input name="source" placeholder="Source (hospital / lab)" />
               <button className="btn small">Upload</button></form>)}
         </div>)}
+
+      <div className="card"><h2>ABHA (Ayushman Bharat Health Account)</h2>
+        {abha ? (
+          <>
+            <p>{abha.abha_number && <><b>{sp.showAbha === '1' && can(session.role, 'patient.write') ? formatAbhaNumber(abha.abha_number) : maskAbhaNumber(abha.abha_number)}</b>{can(session.role, 'patient.write') && sp.showAbha !== '1' && <> <Link className="small" href={`${back}?showAbha=1`}>show</Link></>}</>}
+              {abha.abha_address && <> · {abha.abha_address}</>} <span className={`pill ${abha.verification === 'abdm_verified' ? 'ok' : ''}`}>{label(abha.verification)}</span></p>
+            <p className="small muted">Recorded {fmtDate(abha.recorded_at, tenant)} with the patient’s consent{abha.consent_note ? ` (${abha.consent_note})` : ''}.</p>
+            {can(session.role, 'patient.write') && <details><summary className="small">Remove</summary><form action={abhaAction.bind(null, slug, id)} className="inline-form"><input type="hidden" name="op" value="remove" /><input name="reason" required placeholder="Reason (e.g. consent withdrawn)" /><button className="btn small">Remove</button></form></details>}
+          </>) : <p className="small muted">Not recorded.</p>}
+        {can(session.role, 'patient.write') && (
+          <details open={!abha}><summary className="small">{abha ? 'Replace' : 'Record ABHA'}</summary>
+            <form action={abhaAction.bind(null, slug, id)} className="inline-form wrap"><input type="hidden" name="op" value="record" />
+              <input name="abhaNumber" placeholder="ABHA number (14 digits)" inputMode="numeric" /><input name="abhaAddress" placeholder="ABHA address (name@abdm)" />
+              <select name="verification"><option value="card_seen">ABHA card / app seen</option><option value="self_declared">Told by patient</option></select>
+              <label className="check"><input type="checkbox" name="consent" required /> Patient agreed to the clinic storing and using their ABHA</label>
+              <input name="consentNote" placeholder="Consent note (optional)" /><button className="btn small">Save</button></form>
+            <p className="tiny muted">Verification with ABDM is available once the clinic’s ABDM integration is approved.</p>
+          </details>)}
+      </div>
 
       {can(session.role, 'patient.merge') && p.status !== 'merged' && (
         <div className="card"><h2>Duplicate charts</h2>
