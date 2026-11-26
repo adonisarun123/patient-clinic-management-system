@@ -17,6 +17,11 @@ export default async function Account({ params, searchParams }: { params: Promis
         <label>Confirm new password<input type="password" name="confirm" required minLength={10} autoComplete="new-password" /></label>
         <button className="btn primary">Change password</button>
       </form>
+      <div className="card narrow">
+        <h2>Two-factor sign-in</h2>
+        <p>{session.twoFactorEnabled ? 'On — a code from your phone is needed when you sign in.' : 'Off. Turning it on protects patient records if your password is ever exposed.'}</p>
+        <a className="btn" href={`/${slug}/account/two-factor`}>{session.twoFactorEnabled ? 'Manage' : 'Set up'}</a>
+      </div>
     </>
   );
 }

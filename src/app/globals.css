@@ -138,3 +138,5 @@ pre.code { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8p
 .portal-main .card.narrow { max-width: 520px; margin: 30px auto; }
 .portal-foot { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }
 .list-cards { display: grid; gap: 8px; }
+.recovery-codes { font-size: 1.05rem; letter-spacing: .05em; background: var(--panel, #f8fafc); padding: .75rem 1rem; border-radius: 8px; columns: 2; }
+.secret-key { display: inline-block; margin: .5rem 0; font-size: 1rem; letter-spacing: .08em; word-break: break-all; }

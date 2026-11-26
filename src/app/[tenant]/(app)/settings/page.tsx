@@ -134,7 +134,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
 
       {tab === 'schedules' && <Schedules slug={slug} tenantId={tenant.id} tz={tenant.timezone} cName={cName} lName={lName} cat={cat} locale={tenant.locale} />}
 
-      {tab === 'staff' && <StaffTab slug={slug} actor={actor} cat={cat} />}
+      {tab === 'staff' && <StaffTab slug={slug} actor={actor} cat={cat} required={tenant.settings.twoFactorRoles} />}
 
       {tab === 'website' && <Website slug={slug} tenantId={tenant.id} host={host} />}
     </>
@@ -171,17 +171,25 @@ async function Schedules({ slug, tenantId, tz, cName, lName, cat, locale }: { sl
   );
 }
 
-async function StaffTab({ slug, actor, cat }: { slug: string; actor: Parameters<typeof listStaff>[0]; cat: Awaited<ReturnType<typeof listCatalog>> }) {
+async function StaffTab({ slug, actor, cat, required }: { slug: string; actor: Parameters<typeof listStaff>[0]; cat: Awaited<ReturnType<typeof listCatalog>>; required: string[] }) {
   const rows = await listStaff(actor);
   return (
     <>
+      <form action={staffAction.bind(null, slug)} className="card"><input type="hidden" name="op" value="policy" />
+        <h2>Two-factor sign-in policy</h2>
+        <p className="small muted">Staff in the ticked roles must set up an authenticator app before they can use anything else. Recommended for everyone who can see patient records.</p>
+        <div className="inline-form wrap">{ROLES.map((r) => <label key={r} className="check"><input type="checkbox" name="twoFactorRoles" value={r} defaultChecked={required.includes(r)} /> {ROLE_LABEL[r]}</label>)}</div>
+        <button className="btn primary small">Save policy</button>
+      </form>
       <div className="card"><h2>Staff accounts</h2>
-        <table className="table small"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th /></tr></thead>
+        <table className="table small"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Two-factor</th><th /></tr></thead>
           <tbody>{rows.map((s) => <tr key={s.id} className={s.active ? '' : 'dim'}><td>{s.full_name}{s.clinician_id ? ' · prescriber' : ''}</td><td>{s.email}</td><td>{ROLE_LABEL[s.role]}</td>
             <td>{s.active ? (s.must_change_password ? 'Temp password' : 'Active') : 'Deactivated'}</td>
+            <td>{s.two_factor ? 'On' : required.includes(s.role) ? <span className="pill warn">Required — not set up</span> : 'Off'}</td>
             <td className="row-actions">
               <form action={staffAction.bind(null, slug)}><input type="hidden" name="op" value="toggle" /><input type="hidden" name="staffId" value={s.id} /><input type="hidden" name="active" value={s.active ? '0' : '1'} /><button className="btn small">{s.active ? 'Deactivate' : 'Reactivate'}</button></form>
               {s.active && <form action={staffAction.bind(null, slug)}><input type="hidden" name="op" value="reset" /><input type="hidden" name="staffId" value={s.id} /><button className="btn small">Reset password</button></form>}
+              {s.active && s.two_factor && <form action={staffAction.bind(null, slug)}><input type="hidden" name="op" value="reset2fa" /><input type="hidden" name="staffId" value={s.id} /><button className="btn small">Reset two-factor</button></form>}
             </td></tr>)}</tbody></table></div>
       <form action={staffAction.bind(null, slug)} className="card form-grid">
         <h2 className="span2">Add staff member</h2>

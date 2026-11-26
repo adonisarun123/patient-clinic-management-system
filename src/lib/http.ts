@@ -120,6 +120,7 @@ export async function staffContext(req: Request, slug: string): Promise<{ tenant
   const token = (await cookies()).get(sessionCookie(slug))?.value;
   const s = token ? await sessionFromToken(tenant.id, token) : null;
   if (!s) throw new AppError('UNAUTHENTICATED', 'Sign in required');
+  if (!s.twoFactorEnabled && tenant.settings.twoFactorRoles.includes(s.role)) throw new AppError('FORBIDDEN', 'Set up two-factor sign-in first');
   // Cookie-authenticated writes must come from our own origin (CSRF defence in depth; cookie is SameSite=Lax).
   if (req.method !== 'GET') {
     const origin = req.headers.get('origin');

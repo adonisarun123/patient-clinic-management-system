@@ -210,6 +210,7 @@ test('staff login: session works, bad password fails, deactivation revokes acces
   await withTenant(c.tenant.id, (tx) => tx.exec(`UPDATE staff SET password_hash = $1 WHERE lower(email) = $2`, [bcrypt.hashSync('Correct-horse-1', 4), email]));
   assert.equal(await code(login(c.tenant.id, email, 'wrong')), 'UNAUTHENTICATED');
   const s = await login(c.tenant.id, email, 'Correct-horse-1', '127.0.0.1');
+  assert.ok(s.kind === 'session');
   const sess = await sessionFromToken(c.tenant.id, s.token);
   assert.equal(sess?.role, 'reception');
   // A session token from one clinic is useless at another.

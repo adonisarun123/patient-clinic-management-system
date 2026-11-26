@@ -1,3 +1,4 @@
+import type { Role } from '@/lib/rbac';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { withPlatform, withTenant, type Tx } from '@/lib/db';
@@ -19,6 +20,7 @@ export type TenantSettings = {
   recordsRequestDays: number;           // response clock for records requests (set by the clinic; verify the legal timeline)
   emergencyAccessMinutes: number;
   jitsiBaseUrl: string;
+  twoFactorRoles: Role[];               // roles that must use two-factor sign-in (staff enrol at next sign-in)
 };
 
 export const MODULES = ['labs', 'portal', 'payments', 'telemedicine', 'emergencyAccess', 'pharmacy', 'inpatient', 'import'] as const;
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: TenantSettings = {
   requireAllergyReviewToSign: true, refundApprovalThresholdPaise: 0,
   modules: { labs: false, portal: false, payments: false, telemedicine: false, emergencyAccess: false, pharmacy: false, inpatient: false, import: false },
   autoReleasePrescriptions: false, recordsRequestDays: 30, emergencyAccessMinutes: 60, jitsiBaseUrl: 'https://meet.jit.si',
+  twoFactorRoles: [],
 };
 
 /** SRS ch. 1: conditional modules stay inactive until the clinic switches them on. */
@@ -52,7 +55,7 @@ export function requireModule(t: Tenant, m: ModuleName) {
   if (!t.settings.modules[m]) throw new AppError('FORBIDDEN', `${MODULE_LABEL[m]} is not enabled for this clinic.`);
 }
 
-export async function setModules(tenant: Tenant, modules: Partial<Modules>, extra: Partial<Pick<TenantSettings, 'autoReleasePrescriptions' | 'recordsRequestDays' | 'emergencyAccessMinutes' | 'jitsiBaseUrl'>> = {}) {
+export async function setModules(tenant: Tenant, modules: Partial<Modules>, extra: Partial<Pick<TenantSettings, 'autoReleasePrescriptions' | 'recordsRequestDays' | 'emergencyAccessMinutes' | 'jitsiBaseUrl' | 'twoFactorRoles'>> = {}) {
   const next = { ...tenant.settings.modules, ...modules };
   await withPlatform((tx) => tx.exec(`UPDATE tenant SET settings = settings || $2::jsonb, updated_at = now() WHERE id = $1`,
     [tenant.id, JSON.stringify({ modules: next, ...extra })]));

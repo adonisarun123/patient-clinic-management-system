@@ -17,6 +17,7 @@ import * as catalog from '@/domain/catalog';
 import * as staff from '@/domain/staff';
 import { audit } from '@/lib/events';
 import { authorize } from '@/lib/actor';
+import { ROLES, type Role } from '@/lib/rbac';
 
 import { s, opt, num, localDay, run } from '@/lib/action-helpers';
 
@@ -266,10 +267,18 @@ export async function departmentAction(slug: string, f: FormData) {
 }
 
 export async function staffAction(slug: string, f: FormData) {
-  await run(slug, back(slug, 'staff'), async ({ actor }) => {
+  await run(slug, back(slug, 'staff'), async ({ actor, tenant }) => {
     const op = s(f, 'op');
     if (op === 'toggle') { await staff.setStaffActive(actor, s(f, 'staffId'), s(f, 'active') === '1'); return 'Updated'; }
     if (op === 'reset') { const p = await staff.resetStaffPassword(actor, s(f, 'staffId')); return `Temporary password: ${p} (shown once)`; }
+    if (op === 'reset2fa') { await staff.resetStaffTwoFactor(actor, s(f, 'staffId')); return 'Two-factor sign-in reset. They set it up again at next sign-in.'; }
+    if (op === 'policy') {
+      authorize(actor, 'settings.manage');
+      const roles = f.getAll('twoFactorRoles').map(String).filter((r) => (ROLES as readonly string[]).includes(r)) as Role[];
+      await setModules(tenant, {}, { twoFactorRoles: roles });
+      await withTenant(tenant.id, (tx) => audit(tx, actor, 'settings.two_factor_policy', 'tenant', tenant.id, { data: { roles } }));
+      return roles.length ? `Two-factor sign-in now required for: ${roles.join(', ')}` : 'Two-factor sign-in is optional for everyone';
+    }
     const isClin = s(f, 'isClinician') === 'on';
     const r = await staff.createStaff(actor, { email: s(f, 'email'), fullName: s(f, 'fullName'), role: s(f, 'role') as 'doctor',
       clinician: isClin ? { qualification: opt(f, 'qualification'), specialty: opt(f, 'specialty'), registrationCouncil: opt(f, 'council'),

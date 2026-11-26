@@ -5,6 +5,8 @@ import { listTenants, platformSession, setTenantStatus, tenantUsage } from '@/do
 import { provisionTenant } from '@/domain/tenants';
 import { AppError } from '@/lib/errors';
 import { Flash } from '@/components/ui';
+import { AdminTwoFactor } from './TwoFactor';
+import { adminChangePassword } from './actions';
 
 export const metadata = { robots: { index: false } };
 
@@ -49,6 +51,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
     <main className="main admin">
       <div className="page-head"><div><h1>Clinic Core — platform</h1><p className="muted">Signed in as {admin.full_name}</p></div></div>
       <Flash ok={sp.ok ?? sp.created} err={sp.err} />
+      {(!admin.two_factor || !admin.password_changed_at) && <p className="flash warn">Secure this console: {!admin.password_changed_at && 'replace the temporary password'}{!admin.password_changed_at && !admin.two_factor && ' and '}{!admin.two_factor && 'turn on two-factor sign-in'} (below).</p>}
       <div className="card">
         <h2>Clinics</h2>
         <table className="table"><thead><tr><th>Clinic</th><th>Slug</th><th>Patients</th><th>Bookings (30d)</th><th>Staff</th><th>Status</th><th /></tr></thead>
@@ -68,6 +71,17 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
         <label className="span2">Clinic website origins (for the booking widget)<input name="origins" placeholder="https://www.clinic.com https://clinic.com" /></label>
         <div className="span2"><button className="btn primary">Create clinic</button> <small className="muted">Staff then sign in at {host}/&lt;slug&gt;/login</small></div>
       </form>
+      <div className="card form-grid">
+        <h2 className="span2">Your security</h2>
+        <form action={adminChangePassword}>
+          <h3>Change password</h3>
+          <label>Current password<input type="password" name="current" required autoComplete="current-password" /></label>
+          <label>New password (min 12)<input type="password" name="next" minLength={12} required autoComplete="new-password" /></label>
+          <label>Confirm<input type="password" name="confirm" minLength={12} required autoComplete="new-password" /></label>
+          <button className="btn small">Change password</button>
+        </form>
+        <div><h3>Two-factor sign-in</h3>{admin.two_factor ? <p>On.</p> : <AdminTwoFactor />}</div>
+      </div>
     </main>
   );
 }
