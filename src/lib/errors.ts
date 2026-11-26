@@ -50,3 +50,13 @@ export function fromPg(err: unknown): unknown {
     default: return err;
   }
 }
+
+/** Normalises any thrown value: Zod validation failures become VALIDATION errors with field paths. */
+export function toAppError(err: unknown): unknown {
+  const z = err as { name?: string; issues?: { path: (string | number)[]; message: string }[] };
+  if (z && z.name === 'ZodError' && Array.isArray(z.issues)) {
+    const first = z.issues[0];
+    return new AppError('VALIDATION', first ? first.message : 'Invalid input', z.issues.map((i) => ({ path: i.path.map(String), message: i.message })));
+  }
+  return fromPg(err);
+}

@@ -6,6 +6,7 @@ import { audit, emit } from '@/lib/events';
 import { canonicalJson, sha256 } from '@/lib/crypto';
 import { financialYear } from '@/lib/money';
 import { chartIds } from './patients';
+import { assertChartAccess } from './access';
 import type { Tenant } from './tenants';
 
 const today = (tz: string) => new Date().toLocaleDateString('en-CA', { timeZone: tz });
@@ -57,6 +58,7 @@ export async function getEncounter(actor: Actor, tenant: Tenant, encounterId: st
          FROM encounter e JOIN clinician c ON c.id = e.lead_clinician_id JOIN department d ON d.id = e.department_id
          LEFT JOIN service s ON s.id = e.service_id WHERE e.id = $1`, [encounterId]);
     if (!encounter) throw notFound('Encounter');
+    await assertChartAccess(tx, actor, tenant, encounter.patient_id);
     // One connection per transaction: queries run sequentially.
     const vitals = await tx.many(`SELECT * FROM vitals WHERE encounter_id = $1 AND NOT entered_in_error ORDER BY measured_at DESC`, [encounterId]);
     const notes = await tx.many<NoteRow>(`SELECT n.*, s.full_name AS signer_name FROM clinical_note n LEFT JOIN staff s ON s.id = n.signed_by
@@ -288,6 +290,11 @@ export async function signPrescription(actor: Actor, tenant: Tenant, rxId: strin
     if (rx.supersedes_id) await tx.exec(`UPDATE prescription SET status = 'superseded' WHERE id = $1 AND status = 'signed'`, [rx.supersedes_id]);
     await audit(tx, actor, 'prescription.signed', 'prescription', rxId, { patientId: rx.patient_id, reason: opts.safetyOverrideReason, data: { rxNumber, digest } });
     await emit(tx, 'prescription.signed', 'prescription', rxId, { rxNumber, encounterId: rx.encounter_id });
+    if (tenant.settings.modules.portal && tenant.settings.autoReleasePrescriptions) {
+      await tx.exec(`UPDATE document_release SET revoked_at = now() WHERE doc_kind = 'prescription' AND doc_id = $1 AND revoked_at IS NULL`, [rx.supersedes_id]);
+      await tx.exec(`INSERT INTO document_release (tenant_id, patient_id, doc_kind, doc_id, released_by, note) VALUES (app_tenant_id(), $1, 'prescription', $2, $3, 'auto on signing')
+                     ON CONFLICT DO NOTHING`, [rx.patient_id, rxId, actor.staffId]);
+    }
     return { rxNumber, digest };
   });
 }
@@ -318,6 +325,7 @@ export async function getPrescriptionForPrint(actor: Actor, tenant: Tenant, rxId
   return withTenant(tenant.id, async (tx) => {
     const rx = await tx.maybe<RxRow & { content_digest: string }>(`SELECT * FROM prescription WHERE id = $1`, [rxId]);
     if (!rx || !rx.snapshot) throw notFound('Signed prescription');
+    await assertChartAccess(tx, actor, tenant, rx.patient_id);
     await audit(tx, actor, 'prescription.printed', 'prescription', rxId, { patientId: rx.patient_id });
     return rx;
   });
@@ -430,6 +438,7 @@ export async function followUpWorklist(actor: Actor, tenant: Tenant, opts: { own
 export async function patientTimeline(actor: Actor, tenant: Tenant, patientId: string) {
   authorize(actor, 'clinical.read');
   return withTenant(tenant.id, async (tx) => {
+    await assertChartAccess(tx, actor, tenant, patientId);
     const ids = await chartIds(tx, patientId);
     const encounters = await tx.many<{ id: string; started_at: Date; ended_at: Date | null; status: string; clinician_name: string; department_name: string; service_name: string | null; chief_complaint: string | null; patient_id: string }>(
       `SELECT e.id, e.started_at, e.ended_at, e.status, e.chief_complaint, e.patient_id, c.display_name AS clinician_name,

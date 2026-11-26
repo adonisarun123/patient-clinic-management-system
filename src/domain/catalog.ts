@@ -17,7 +17,7 @@ export type Service = {
   id: string; department_id: string; code: string; name: string; kind: string; duration_min: number;
   buffer_before_min: number; buffer_after_min: number; price_paise: number; tax_rate_bp: number;
   follow_up_free_days: number; public_bookable: boolean; patient_instructions: string | null;
-  active: boolean; version: number; clinician_ids: string[];
+  active: boolean; version: number; clinician_ids: string[]; modality: string;
 };
 
 export async function listCatalog(tenantId: string, { publicOnly = false } = {}) {
@@ -57,7 +57,7 @@ export async function upsertLocation(actor: Actor, input: { id?: string; code: s
   authorize(actor, 'settings.manage');
   const p = z.object({
     id: z.uuid().optional(), code, name: z.string().trim().min(1).max(120),
-    kind: z.enum(['room', 'counter', 'equipment']).default('room'), departmentId: z.uuid().nullish(), active: z.boolean().default(true),
+    kind: z.enum(['room', 'counter', 'equipment', 'store', 'ward', 'lab']).default('room'), departmentId: z.uuid().nullish(), active: z.boolean().default(true),
   }).parse(input);
   return withTenant(actor.tenantId, async (tx) => {
     const row = p.id
@@ -121,6 +121,7 @@ export const serviceInput = z.object({
   taxRateBp: z.number().int().min(0).max(10000).default(0),
   followUpFreeDays: z.number().int().min(0).max(365).default(0),
   publicBookable: z.boolean().default(true),
+  modality: z.enum(['in_person', 'video']).default('in_person'),
   patientInstructions: z.string().max(2000).optional(),
   active: z.boolean().default(true),
   clinicianIds: z.array(z.uuid()).min(1, 'Choose at least one eligible doctor'),
@@ -134,16 +135,16 @@ export async function upsertService(actor: Actor, input: z.input<typeof serviceI
   const p = r.data;
   return withTenant(actor.tenantId, async (tx) => {
     const vals = [p.departmentId, p.code.toUpperCase(), p.name, p.kind, p.durationMin, p.bufferBeforeMin, p.bufferAfterMin,
-      p.pricePaise, p.taxRateBp, p.followUpFreeDays, p.publicBookable, p.patientInstructions ?? null, p.active];
+      p.pricePaise, p.taxRateBp, p.followUpFreeDays, p.publicBookable, p.patientInstructions ?? null, p.active, p.modality];
     const row = p.id
       ? await tx.one<{ id: string }>(
         `UPDATE service SET department_id=$2, code=$3, name=$4, kind=$5, duration_min=$6, buffer_before_min=$7, buffer_after_min=$8,
-                price_paise=$9, tax_rate_bp=$10, follow_up_free_days=$11, public_bookable=$12, patient_instructions=$13, active=$14,
+                price_paise=$9, tax_rate_bp=$10, follow_up_free_days=$11, public_bookable=$12, patient_instructions=$13, active=$14, modality=$15,
                 version = version + 1 WHERE id=$1 RETURNING id`, [p.id, ...vals])
       : await tx.one<{ id: string }>(
         `INSERT INTO service (tenant_id, department_id, code, name, kind, duration_min, buffer_before_min, buffer_after_min,
-                price_paise, tax_rate_bp, follow_up_free_days, public_bookable, patient_instructions, active)
-         VALUES (app_tenant_id(), $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, vals);
+                price_paise, tax_rate_bp, follow_up_free_days, public_bookable, patient_instructions, active, modality)
+         VALUES (app_tenant_id(), $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`, vals);
     await tx.exec(`DELETE FROM service_clinician WHERE service_id = $1`, [row.id]);
     for (const c of p.clinicianIds) {
       await tx.exec(`INSERT INTO service_clinician (tenant_id, service_id, clinician_id) VALUES (app_tenant_id(), $1, $2)`, [row.id, c]);

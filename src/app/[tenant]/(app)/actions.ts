@@ -3,9 +3,9 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireStaff } from '@/lib/session';
-import { AppError } from '@/lib/errors';
+import { AppError, toAppError } from '@/lib/errors';
 import { toPaise } from '@/lib/money';
-import { createApiKey, updateTenantSettings, getTenantBySlug } from '@/domain/tenants';
+import { createApiKey, updateTenantSettings, getTenantBySlug, setModules, setSecret, MODULES } from '@/domain/tenants';
 import { withTenant } from '@/lib/db';
 import { randomToken } from '@/lib/crypto';
 import * as patients from '@/domain/patients';
@@ -18,33 +18,7 @@ import * as staff from '@/domain/staff';
 import { audit } from '@/lib/events';
 import { authorize } from '@/lib/actor';
 
-const s = (f: FormData, k: string) => { const v = f.get(k); return typeof v === 'string' ? v.trim() : ''; };
-const opt = (f: FormData, k: string) => s(f, k) || undefined;
-const num = (f: FormData, k: string) => (s(f, k) === '' ? undefined : Number(s(f, k)));
-const localDay = (iso: string, tz: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });
-const withMsg = (path: string, key: 'ok' | 'err', msg: string) => `${path}${path.includes('?') ? '&' : '?'}${key}=${encodeURIComponent(msg)}`;
-
-/** Runs an action, then redirects back with a flash message. Errors become friendly messages, never stack traces. */
-async function run(slug: string, back: string, fn: (ctx: Awaited<ReturnType<typeof requireStaff>>) => Promise<string | { redirect: string; msg?: string } | void>) {
-  const ctx = await requireStaff(slug);
-  let target = back; let msg = 'Saved';
-  try {
-    const r = await fn(ctx);
-    if (typeof r === 'string') msg = r;
-    else if (r && 'redirect' in r) { target = r.redirect; msg = r.msg ?? ''; }
-  } catch (e) {
-    if (e instanceof AppError) {
-      let m = e.message;
-      const d = e.details as { candidates?: { uhid: string; full_name: string; reason: string }[] } | { message?: string; path?: string[] }[] | undefined;
-      if (d && !Array.isArray(d) && d.candidates) m += ` Matches: ${d.candidates.map((c) => `${c.full_name} (${c.uhid}, ${c.reason})`).join('; ')}`;
-      if (Array.isArray(d) && d[0]?.message) m += ` — ${d[0].path?.join('.') ?? ''} ${d[0].message}`;
-      redirect(withMsg(back, 'err', m));
-    }
-    throw e;
-  }
-  revalidatePath(`/${slug}`, 'layout');
-  redirect(msg ? withMsg(target, 'ok', msg) : target);
-}
+import { s, opt, num, localDay, run } from '@/lib/action-helpers';
 
 // ------------------------------------------------------------------ patients
 export async function registerPatientAction(slug: string, f: FormData) {
@@ -318,7 +292,7 @@ export async function serviceAction(slug: string, f: FormData) {
     await catalog.upsertService(actor, { id: opt(f, 'id'), departmentId: s(f, 'departmentId'), code: s(f, 'code'), name: s(f, 'name'), kind: s(f, 'kind') as 'consultation',
       durationMin: Number(s(f, 'durationMin')), bufferBeforeMin: num(f, 'bufferBeforeMin') ?? 0, bufferAfterMin: num(f, 'bufferAfterMin') ?? 0,
       pricePaise: toPaise(s(f, 'price') || '0'), taxRateBp: Math.round(Number(s(f, 'taxRate') || '0') * 100), followUpFreeDays: num(f, 'followUpFreeDays') ?? 0,
-      publicBookable: s(f, 'publicBookable') === 'on', patientInstructions: opt(f, 'instructions'), active: s(f, 'active') !== 'off',
+      publicBookable: s(f, 'publicBookable') === 'on', modality: (s(f, 'modality') || 'in_person') as 'video', patientInstructions: opt(f, 'instructions'), active: s(f, 'active') !== 'off',
       clinicianIds: f.getAll('clinicianIds').map(String) });
     return 'Service saved';
   });
@@ -371,3 +345,25 @@ export async function changePasswordAction(slug: string, f: FormData) {
 }
 
 export async function refreshTenant(slug: string) { return getTenantBySlug(slug); }
+
+export async function modulesAction(slug: string, f: FormData) {
+  await run(slug, `/${slug}/settings?tab=modules`, async ({ actor, tenant }) => {
+    authorize(actor, 'settings.manage');
+    if (s(f, 'secretsOnly') === '1') {
+      const names = ['razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'msg91_authkey', 'msg91_otp_template_id'];
+      await withTenant(tenant.id, async (tx) => {
+        for (const n of names) if (s(f, n)) await setSecret(tx, n, s(f, n), actor.staffId);
+        await audit(tx, actor, 'secrets.updated', 'tenant', tenant.id, { data: { names: names.filter((n) => s(f, n)) } });
+      });
+      return 'Credentials saved';
+    }
+    if (actor.role !== 'owner') throw new AppError('FORBIDDEN', 'Only the clinic owner can switch modules');
+    const mods = Object.fromEntries(MODULES.map((m) => [m, s(f, `m_${m}`) === 'on']));
+    const jitsi = s(f, 'jitsiBaseUrl') || 'https://meet.jit.si';
+    if (!/^https:\/\//.test(jitsi)) throw new AppError('VALIDATION', 'Video server URL must start with https://');
+    await setModules(tenant, mods, { autoReleasePrescriptions: s(f, 'autoReleasePrescriptions') === 'on', recordsRequestDays: Number(s(f, 'recordsRequestDays') || 30),
+      emergencyAccessMinutes: Number(s(f, 'emergencyAccessMinutes') || 60), jitsiBaseUrl: jitsi });
+    await withTenant(tenant.id, (tx) => audit(tx, actor, 'modules.updated', 'tenant', tenant.id, { data: mods }));
+    return 'Modules saved';
+  });
+}

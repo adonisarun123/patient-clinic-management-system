@@ -2,15 +2,17 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { requireStaff } from '@/lib/session';
 import { listCatalog, listSchedules } from '@/domain/catalog';
-import { listIntegrations } from '@/domain/tenants';
+import { listIntegrations, MODULES, MODULE_LABEL } from '@/domain/tenants';
+import { withTenant } from '@/lib/db';
+import { gatewayActivity } from '@/domain/payments';
 import { listStaff } from '@/domain/staff';
 import { ROLES, ROLE_LABEL } from '@/lib/rbac';
 import { EVENT_TYPES } from '@/lib/events';
 import { fmtDateTime, label, money } from '@/lib/format';
 import { Badge, Flash, PageHead } from '@/components/ui';
-import { clinicSettingsAction, clinicianAction, departmentAction, integrationAction, scheduleAction, serviceAction, staffAction } from '../actions';
+import { modulesAction, clinicSettingsAction, clinicianAction, departmentAction, integrationAction, scheduleAction, serviceAction, staffAction } from '../actions';
 
-const TABS = ['clinic', 'structure', 'doctors', 'services', 'schedules', 'staff', 'website'] as const;
+const TABS = ['clinic', 'modules', 'structure', 'doctors', 'services', 'schedules', 'staff', 'website'] as const;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default async function Settings({ params, searchParams }: { params: Promise<{ tenant: string }>; searchParams: Promise<{ tab?: string; edit?: string; ok?: string; err?: string }> }) {
@@ -57,6 +59,8 @@ export default async function Settings({ params, searchParams }: { params: Promi
           <label>Minimum notice for online booking (min)<input type="number" name="minLeadMinutes" min={0} defaultValue={st.minLeadMinutes} /></label>
           <div className="span2"><button className="btn primary">Save</button></div>
         </form>)}
+
+      {tab === 'modules' && <ModulesTab slug={slug} tenant={tenant} host={host} canToggle={actor.role === 'owner'} />}
 
       {tab === 'structure' && (
         <div className="grid2">
@@ -121,6 +125,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
             <label>Eligible doctors<select name="clinicianIds" multiple required defaultValue={editSvc?.clinician_ids}>{cat.clinicians.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.display_name}</option>)}</select></label>
             <label className="span2">Patient instructions (shown after booking)<textarea name="instructions" rows={2} defaultValue={editSvc?.patient_instructions ?? ''} /></label>
             <label className="check"><input type="checkbox" name="publicBookable" defaultChecked={editSvc?.public_bookable ?? true} /> Bookable online</label>
+            <label>Mode<select name="modality" defaultValue={editSvc?.modality ?? 'in_person'}><option value="in_person">In person</option><option value="video">Video consultation</option></select></label>
             {editSvc && <label>Status<select name="active" defaultValue={editSvc.active ? 'on' : 'off'}><option value="on">Active</option><option value="off">Retired</option></select></label>}
             <p className="span2 small muted">Most Indian healthcare services are GST-exempt; confirm tax treatment with your accountant before setting a rate.</p>
             <div className="span2"><button className="btn primary">Save service</button></div>
@@ -229,6 +234,62 @@ async function Website({ slug, tenantId, host }: { slug: string; tenantId: strin
           <select name="events" multiple size={4}>{EVENT_TYPES.map((e) => <option key={e} value={e}>{e}</option>)}</select>
           <label className="check"><input type="checkbox" name="includeContact" /> Include patient name and phone (needed for WhatsApp/SMS reminders)</label>
           <button className="btn small primary">Add webhook</button></form></div>
+    </>
+  );
+}
+
+const MODULE_NOTE: Record<string, string> = {
+  labs: 'Order tests, record and amend results, critical-result acknowledgement.',
+  portal: 'Patients sign in with a mobile OTP; staff link each chart after checking identity.',
+  payments: 'Patients pay invoices online through Razorpay hosted checkout.',
+  telemedicine: 'Video consultations with recorded consent and identity checks.',
+  emergencyAccess: 'Mark sensitive charts restricted; break-glass access is time-limited and reviewed.',
+  pharmacy: 'Licensed dispensing, batch and expiry stock, purchase orders, recalls, counts. Needs pharmacist sign-off.',
+  inpatient: 'Beds, admissions, transfers, medication administration, discharge. Needs nursing and medical sign-off.',
+  import: 'Bring patients and future bookings from an old system with a dry run first.',
+};
+
+async function ModulesTab({ slug, tenant, host, canToggle }: { slug: string; tenant: Awaited<ReturnType<typeof requireStaff>>['tenant']; host: string; canToggle: boolean }) {
+  const st = tenant.settings;
+  const secrets = await withTenant(tenant.id, (tx) => tx.many<{ name: string; hint: string | null; updated_at: Date }>(`SELECT name, hint, updated_at FROM tenant_secret ORDER BY name`));
+  const has = (n: string) => secrets.find((x) => x.name === n);
+  const gw = st.modules.payments ? await gatewayActivity(tenant.id) : null;
+  return (
+    <>
+      <form action={modulesAction.bind(null, slug)} className="card">
+        <h2>Modules</h2>
+        <p className="small muted">Each module stays off until you switch it on. Only the clinic owner can change these. Switching a module off hides it; data is kept.</p>
+        <table className="table"><tbody>{MODULES.map((m) => (
+          <tr key={m}><td><label className="check"><input type="checkbox" name={`m_${m}`} defaultChecked={st.modules[m]} disabled={!canToggle} /> <b>{MODULE_LABEL[m]}</b></label></td><td className="small muted">{MODULE_NOTE[m]}</td></tr>))}
+        </tbody></table>
+        <div className="form-grid">
+          <label className="check"><input type="checkbox" name="autoReleasePrescriptions" defaultChecked={st.autoReleasePrescriptions} disabled={!canToggle} /> Release signed prescriptions to the portal automatically</label>
+          <label>Records request response time (days) — confirm the legal timeline<input type="number" name="recordsRequestDays" min={1} max={90} defaultValue={st.recordsRequestDays} disabled={!canToggle} /></label>
+          <label>Emergency access lasts (minutes)<input type="number" name="emergencyAccessMinutes" min={5} max={720} defaultValue={st.emergencyAccessMinutes} disabled={!canToggle} /></label>
+          <label>Video server (Jitsi base URL)<input name="jitsiBaseUrl" defaultValue={st.jitsiBaseUrl} disabled={!canToggle} /></label>
+        </div>
+        {canToggle ? <button className="btn primary">Save modules</button> : <p className="muted small">Only the owner can change modules.</p>}
+      </form>
+      <form action={modulesAction.bind(null, slug)} className="card form-grid">
+        <input type="hidden" name="secretsOnly" value="1" />
+        <h2 className="span2">Provider credentials (stored encrypted)</h2>
+        <p className="span2 small muted">Leave a field blank to keep the saved value. Values are never shown again after saving.</p>
+        <label>Razorpay Key ID {has('razorpay_key_id') && <small className="muted">saved {has('razorpay_key_id')!.hint}</small>}<input name="razorpay_key_id" placeholder="rzp_live_…" autoComplete="off" /></label>
+        <label>Razorpay Key Secret {has('razorpay_key_secret') && <small className="muted">saved {has('razorpay_key_secret')!.hint}</small>}<input name="razorpay_key_secret" type="password" autoComplete="off" /></label>
+        <label>Razorpay webhook secret {has('razorpay_webhook_secret') && <small className="muted">saved</small>}<input name="razorpay_webhook_secret" type="password" autoComplete="off" /></label>
+        <label>Razorpay webhook URL (paste in Razorpay dashboard, event payment.captured)<input readOnly value={`${host}/api/webhooks/razorpay/${slug}`} /></label>
+        <label>MSG91 auth key {has('msg91_authkey') && <small className="muted">saved {has('msg91_authkey')!.hint}</small>}<input name="msg91_authkey" type="password" autoComplete="off" /></label>
+        <label>MSG91 OTP template ID (DLT-approved, variable “otp”) {has('msg91_otp_template_id') && <small className="muted">saved</small>}<input name="msg91_otp_template_id" autoComplete="off" /></label>
+        <p className="span2 small muted">Without Razorpay keys, online payment runs in sandbox mode on test servers and is disabled in production. Without MSG91, OTPs are only written to the server log on test servers.</p>
+        <div className="span2"><button className="btn primary">Save credentials</button></div>
+      </form>
+      {gw && (
+        <div className="card"><h2>Online payment activity</h2>
+          <table className="table small"><thead><tr><th>When</th><th>Patient</th><th>Order</th><th>Amount</th><th>Status</th><th>Payment</th></tr></thead>
+            <tbody>{gw.orders.map((o) => <tr key={o.id}><td>{new Date(o.created_at).toISOString().slice(0, 16).replace('T', ' ')}</td><td>{o.full_name}</td><td><code>{o.provider_order_id}</code></td><td>{money(o.amount_paise, tenant)}</td><td><Badge v={o.status} /></td><td>{o.provider_payment_id}</td></tr>)}</tbody></table>
+          <h3>Webhook deliveries</h3>
+          <table className="table small"><tbody>{gw.events.map((e, i) => <tr key={i}><td>{new Date(e.received_at).toISOString().slice(0, 16).replace('T', ' ')}</td><td>{e.event_type}</td><td>{e.signature_ok ? 'signature ok' : <span className="pill danger">bad signature</span>}</td><td>{e.outcome}</td></tr>)}</tbody></table>
+        </div>)}
     </>
   );
 }

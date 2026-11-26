@@ -62,7 +62,7 @@ export default async function Appointments({ params, searchParams }: { params: P
                 <td><Link href={`/${slug}/patients/${a.patient_id}`}><b>{a.full_name}</b></Link><br /><small className="muted">{a.uhid} · {maskPhone(a.phone_e164)}</small>
                   {a.patient_status === 'provisional' && <><br /><span className="pill warn">Online booking — confirm identity</span></>}</td>
                 <td>{a.clinician_name}<br /><small className="muted">{a.location_name}</small></td>
-                <td>{a.service_name}<br /><small className="muted">{a.source}{a.notes ? ` · ${a.notes}` : ''}</small></td>
+                <td>{a.service_name}{a.modality === 'video' && <> <Link className="pill ok" href={`/${slug}/video/${a.id}`}>Video ▸</Link></>}<br /><small className="muted">{a.source}{a.notes ? ` · ${a.notes}` : ''}</small></td>
                 <td><Badge v={a.state} />{a.token_no ? <div className="muted small">Token {a.token_no}</div> : null}</td>
                 <td className="row-actions">
                   {a.state === 'booked' && can(session.role, 'queue.manage') && (

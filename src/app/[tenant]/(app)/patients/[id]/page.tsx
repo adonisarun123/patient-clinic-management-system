@@ -7,6 +7,13 @@ import { can } from '@/lib/rbac';
 import { birthLabel } from '@/lib/identity';
 import { fmtDate, fmtDateTime, label } from '@/lib/format';
 import { Badge, Empty, Flash, PatientBanner } from '@/components/ui';
+import { listPatientDocuments } from '@/domain/attachments';
+import { patientPortalLinks, releasedIds } from '@/domain/portal';
+import { patientOrders } from '@/domain/labs';
+import { patientDispenses } from '@/domain/pharmacy';
+import { BreakGlass } from '@/components/BreakGlass';
+import { needsBreakGlass } from '@/lib/gate';
+import { uploadDocAction, docErrorAction, portalLinkAction, restrictAction, releaseAction, returnAction } from '../../module-actions';
 import { allergyAction, allergyStatusAction, confirmIdentityAction, linkPatientAction, updatePatientAction, walkInAction, followUpAction } from '../../actions';
 
 type Sp = { ok?: string; err?: string; edit?: string; link?: string };
@@ -17,7 +24,18 @@ export default async function PatientChart({ params, searchParams }: { params: P
   const { tenant, actor, session } = await requireStaff(slug, 'patient.read');
   const p = await getPatient(actor, id);
   const canClinical = can(session.role, 'clinical.read');
-  const t = canClinical ? await patientTimeline(actor, tenant, id) : null;
+  let t: Awaited<ReturnType<typeof patientTimeline>> | null = null;
+  let locked = false;
+  if (canClinical) {
+    try { t = await patientTimeline(actor, tenant, id); } catch (e) { if (needsBreakGlass(e)) locked = true; else throw e; }
+  }
+  const m = tenant.settings.modules;
+  const docs = t ? await listPatientDocuments(actor, tenant, id) : [];
+  const links = m.portal && can(session.role, 'portal.manage') ? await patientPortalLinks(actor, tenant, id) : [];
+  const released = m.portal && t ? await releasedIds(tenant, id) : [];
+  const isReleased = (kind: string, docId: string) => released.some((r) => r.doc_kind === kind && r.doc_id === docId);
+  const orders = t ? await patientOrders(actor, tenant, id) : [];
+  const dispenses = m.pharmacy && t && can(session.role, 'pharmacy.dispense') ? await patientDispenses(tenant.id, id) : [];
   const history = sp.edit ? await patientHistory(actor, id) : [];
   const cat = await listCatalog(tenant.id);
   const linkResults = sp.link ? (await searchPatients(actor, sp.link)).filter((r) => r.id !== id && r.status !== 'merged') : [];
@@ -32,10 +50,13 @@ export default async function PatientChart({ params, searchParams }: { params: P
     <>
       <PatientBanner p={p} slug={slug} allergies={activeAllergies} />
       <Flash ok={sp.ok} err={sp.err} />
+      {locked && <BreakGlass slug={slug} patientId={id} back={back} minutes={tenant.settings.emergencyAccessMinutes} />}
+      {(p as { restricted?: boolean }).restricted && !locked && <p className="pill danger">Restricted record — every access is logged</p>}
       <div className="actions-row">
         {can(session.role, 'schedule.book') && <Link className="btn primary" href={`/${slug}/appointments/new?patientId=${id}`}>Book appointment</Link>}
         {can(session.role, 'billing.read') && <Link className="btn" href={`/${slug}/billing?patient=${id}`}>Account & billing</Link>}
         {can(session.role, 'patient.write') && <Link className="btn" href={`${back}?edit=1`}>Edit details</Link>}
+        {m.inpatient && can(session.role, 'inpatient.admit') && <Link className="btn" href={`/${slug}/inpatient?admit=${id}`}>Admit</Link>}
       </div>
 
       {(p.status === 'provisional' || p.status === 'temporary') && can(session.role, 'patient.write') && (
@@ -187,6 +208,70 @@ export default async function PatientChart({ params, searchParams }: { params: P
             </div>)}
         </>
       )}
+
+      {t && orders.length > 0 && (
+        <div className="card"><h2>Lab & imaging</h2>
+          <table className="table small"><tbody>{orders.map((o) => (
+            <tr key={o.id}><td><Link href={`/${slug}/labs/${o.id}`}>{o.accession_no}</Link></td><td>{o.test_name}</td><td>{fmtDateTime(o.created_at, tenant)}</td>
+              <td>{o.value_num ?? o.value_text ?? ''} {o.unit}</td><td><Badge v={o.status} />{o.latest_critical ? <span className="pill danger">Critical</span> : null}</td></tr>))}</tbody></table></div>)}
+
+      {t && m.portal && t.prescriptions.some((r) => r.status === 'signed') && can(session.role, 'clinical.read') && (
+        <div className="card"><h2>Portal documents</h2>
+          <table className="table small"><tbody>{t.prescriptions.filter((r) => r.status === 'signed').map((r) => (
+            <tr key={r.id}><td>Prescription {r.rx_number}</td><td>{fmtDateTime(r.signed_at, tenant)}</td>
+              <td><form action={releaseAction.bind(null, slug, back)} className="inline-form"><input type="hidden" name="patientId" value={id} /><input type="hidden" name="kind" value="prescription" /><input type="hidden" name="docId" value={r.id} />
+                {isReleased('prescription', r.id) ? <><input type="hidden" name="op" value="revoke" /><span className="pill ok">In portal</span><button className="btn small">Remove</button></> : <button className="btn small">Release to portal</button>}</form></td></tr>))}</tbody></table></div>)}
+
+      {t && (
+        <div className="card"><h2>Documents</h2>
+          {docs.length === 0 ? <Empty>No documents filed.</Empty> : <table className="table small"><tbody>{docs.map((d) => (
+            <tr key={d.id} className={d.status === 'active' ? '' : 'dim'}><td><a href={`/${slug}/files/${d.id}`}>{d.title}</a><br /><small className="muted">{d.category} · {d.filename} · {Math.ceil(d.size_bytes / 1024)} KB</small></td>
+              <td>{d.document_date ? fmtDate(d.document_date, tenant) : fmtDate(d.created_at, tenant)}{d.source ? <div className="small muted">{d.source}</div> : null}</td>
+              <td>{m.portal && d.status === 'active' && (
+                <form action={releaseAction.bind(null, slug, back)} className="inline-form"><input type="hidden" name="patientId" value={id} /><input type="hidden" name="kind" value="attachment" /><input type="hidden" name="docId" value={d.id} />
+                  {isReleased('attachment', d.id) ? <><input type="hidden" name="op" value="revoke" /><span className="pill ok">In portal</span><button className="btn small">Remove</button></> : <button className="btn small">Release</button>}</form>)}
+                {d.status === 'active' && can(session.role, 'patient.merge') && <details><summary className="small">Entered in error</summary><form action={docErrorAction.bind(null, slug, id, d.id)} className="inline-form"><input name="reason" required placeholder="Reason" /><button className="btn small">Mark</button></form></details>}</td></tr>))}</tbody></table>}
+          {can(session.role, 'patient.write') && (
+            <form action={uploadDocAction.bind(null, slug, id)} className="inline-form wrap" encType="multipart/form-data">
+              <input type="file" name="file" accept="application/pdf,image/jpeg,image/png" required />
+              <input name="title" placeholder="Title (e.g. MRI knee report)" required />
+              <select name="category"><option value="outside_report">Outside report</option><option value="discharge_summary">Old discharge summary</option><option value="imaging">Imaging</option><option value="referral">Referral letter</option><option value="consent">Signed consent</option><option value="id_document">ID document</option><option value="other">Other</option></select>
+              <input type="date" name="documentDate" title="Date on the document" /><input name="source" placeholder="Source (hospital / lab)" />
+              <button className="btn small">Upload</button></form>)}
+        </div>)}
+
+      {m.portal && can(session.role, 'portal.manage') && (
+        <div className="card"><h2>Patient portal access</h2>
+          <p className="small muted">A verified phone number alone never shows a chart. Link each phone only after checking the person’s identity and, for a representative, their authority.</p>
+          {links.length > 0 && <table className="table small"><tbody>{links.map((l) => (
+            <tr key={l.id}><td>{l.phone_e164}</td><td>{label(l.relation)}</td><td>{[l.can_schedule && 'appointments', l.can_view_documents && 'documents', l.can_pay && 'payments'].filter(Boolean).join(', ')}</td>
+              <td className="small">{l.evidence} — {l.verifier}{l.valid_until ? ` · until ${l.valid_until}` : ''}</td>
+              <td><form action={portalLinkAction.bind(null, slug, id)} className="inline-form"><input type="hidden" name="op" value="revoke" /><input type="hidden" name="linkId" value={l.id} /><input name="reason" placeholder="Reason" required /><button className="btn small danger">Revoke</button></form></td></tr>))}</tbody></table>}
+          <form action={portalLinkAction.bind(null, slug, id)} className="inline-form wrap">
+            <input name="phone" placeholder="Mobile number" defaultValue={p.phone_e164 ?? ''} required />
+            <select name="relation"><option value="self">Self</option><option value="parent">Parent</option><option value="guardian">Guardian</option><option value="spouse">Spouse</option><option value="child">Adult child</option><option value="representative">Authorised representative</option></select>
+            <label className="check"><input type="checkbox" name="canSchedule" defaultChecked /> Appointments</label>
+            <label className="check"><input type="checkbox" name="canViewDocuments" defaultChecked /> Documents</label>
+            <label className="check"><input type="checkbox" name="canPay" defaultChecked /> Payments</label>
+            <input type="date" name="validUntil" title="Valid until (e.g. child turns 18)" />
+            <input name="evidence" placeholder="How identity/authority was verified" required minLength={5} />
+            <button className="btn small primary">Grant access</button></form>
+        </div>)}
+
+      {dispenses.length > 0 && (
+        <div className="card"><h2>Medicines dispensed</h2>
+          <table className="table small"><tbody>{dispenses.map((d) => (
+            <tr key={d.line_id}><td>{d.dispense_no}</td><td>{fmtDateTime(d.at, tenant)}</td><td>{d.generic_name} · batch {d.batch_no}</td><td>×{d.qty}{d.qty_returned ? ` (returned ${d.qty_returned})` : ''}</td>
+              <td>{d.qty > d.qty_returned && <details><summary className="small">Return</summary><form action={returnAction.bind(null, slug, back)} className="inline-form">
+                <input type="hidden" name="lineId" value={d.line_id} /><input name="qty" type="number" min={1} max={d.qty - d.qty_returned} defaultValue={1} />
+                <label className="check"><input type="checkbox" name="restock" /> Sealed, restock</label><input name="reason" placeholder="Reason" required /><button className="btn small">Return</button></form></details>}</td></tr>))}</tbody></table></div>)}
+
+      {m.emergencyAccess && can(session.role, 'emergency.review') && (
+        <form action={restrictAction.bind(null, slug, id)} className="card inline-form">
+          <input type="hidden" name="restricted" value={(p as { restricted?: boolean }).restricted ? '0' : '1'} />
+          <b>{(p as { restricted?: boolean }).restricted ? 'Remove restriction' : 'Restrict this record'}</b>
+          <input name="reason" placeholder="Reason (e.g. staff member, public figure, sensitive care)" required />
+          <button className="btn small">{(p as { restricted?: boolean }).restricted ? 'Unrestrict' : 'Restrict'}</button></form>)}
     </>
   );
 }

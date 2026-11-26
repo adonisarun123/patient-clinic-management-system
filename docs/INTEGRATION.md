@@ -49,7 +49,10 @@ Codes: `VALIDATION 422`, `UNAUTHENTICATED 401`, `FORBIDDEN 403`, `NOT_FOUND 404`
 ## 5. Webhooks
 Events: `patient.registered, appointment.booked, appointment.rescheduled, appointment.cancelled, appointment.checked_in,
 appointment.no_show, appointment.completed, prescription.signed, invoice.posted, invoice.voided, payment.received,
-refund.paid, follow_up.created`.
+refund.paid, follow_up.created, result.critical, result.final, document.released, records_request.received,
+patient.admitted, patient.discharged, dispense.completed, lot.recalled, emergency_access.granted`.
+
+`result.critical` is meant for paging: route it to the on-duty doctor's WhatsApp/SMS through your provider.
 
 ```json
 { "id": "evt uuid", "type": "appointment.booked", "clinic": "slug", "occurredAt": "…",
@@ -63,3 +66,7 @@ const [t, v1] = header.split(',').map((p) => p.split('=')[1]);
 const ok = crypto.createHmac('sha256', SECRET).update(`${t}.${rawBody}`).digest('hex') === v1 && Date.now()/1000 - t < 300;
 ```
 Failed deliveries retry with exponential backoff (up to 8 attempts). Deliveries are at-least-once, so deduplicate on `id`.
+
+## 6. Patient portal and online payments
+- Portal URL per clinic: `https://<host>/p/<slug>` (link it from the clinic website's menu as "Patient login").
+- Razorpay webhook: `POST https://<host>/api/webhooks/razorpay/<slug>`, event `payment.captured`, signed with the webhook secret saved in Settings › Modules.

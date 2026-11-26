@@ -195,7 +195,7 @@ export async function releaseHold(actor: Actor, tenant: Tenant, holdId: string) 
 export const confirmInput = z.object({
   holdId: z.uuid(),
   patientId: z.uuid(),
-  source: z.enum(['staff', 'widget', 'api', 'phone']).default('staff'),
+  source: z.enum(['staff', 'widget', 'api', 'phone', 'portal', 'import']).default('staff'),
   notes: z.string().max(1000).optional(),
 });
 
@@ -222,16 +222,16 @@ export async function confirmInTx(tx: Tx, actor: Actor, tenant: Tenant, p: z.inf
     `SELECT booking_ref FROM appointment WHERE patient_id = $1 AND state IN ('booked','arrived','in_service')
         AND period && tstzrange($2, $3, '[)')`, [p.patientId, hold.start_at, hold.end_at]);
   if (clash) throw rule('This patient already has an appointment at an overlapping time.');
-  const svc = await tx.one<{ department_id: string; price_paise: number; version: number; name: string }>(
-    `SELECT department_id, price_paise, version, name FROM service WHERE id = $1`, [hold.service_id]);
+  const svc = await tx.one<{ department_id: string; price_paise: number; version: number; name: string; modality: string }>(
+    `SELECT department_id, price_paise, version, name, modality FROM service WHERE id = $1`, [hold.service_id]);
   const n = await tx.one<{ v: number }>(`SELECT next_doc_number('booking') AS v`);
   const bookingRef = `BK${String(n.v).padStart(6, '0')}`;
   const appt = await tx.one<{ id: string; version: number }>(
     `INSERT INTO appointment (tenant_id, booking_ref, patient_id, clinician_id, service_id, service_version, department_id, location_id,
-        period, source, quoted_price_paise, notes, requested_clinician_id, created_by)
-     VALUES (app_tenant_id(), $1,$2,$3,$4,$5,$6,$7, tstzrange($8,$9,'[)'), $10,$11,$12,$3,$13) RETURNING id, version`,
+        period, source, quoted_price_paise, notes, requested_clinician_id, created_by, modality)
+     VALUES (app_tenant_id(), $1,$2,$3,$4,$5,$6,$7, tstzrange($8,$9,'[)'), $10,$11,$12,$3,$13,$14) RETURNING id, version`,
     [bookingRef, p.patientId, hold.clinician_id, hold.service_id, svc.version, svc.department_id, hold.location_id,
-      hold.start_at, hold.end_at, p.source, svc.price_paise, p.notes ?? null, staffId(actor)]);
+      hold.start_at, hold.end_at, p.source, svc.price_paise, p.notes ?? null, staffId(actor), svc.modality]);
   const switched = await tx.exec(
     `UPDATE resource_claim SET status = 'booked', appointment_id = $2, expires_at = NULL WHERE hold_id = $1 AND status = 'hold'`,
     [hold.id, appt.id]);
@@ -245,7 +245,7 @@ export async function confirmInTx(tx: Tx, actor: Actor, tenant: Tenant, p: z.inf
   // Outbound messages are queued only with the committed booking (OP-020).
   await emit(tx, 'appointment.booked', 'appointment', appt.id,
     { bookingRef, start: iso(hold.start_at), end: iso(hold.end_at), clinicianId: hold.clinician_id, serviceId: hold.service_id, patientId: p.patientId, source: p.source }, 1);
-  return { appointmentId: appt.id, bookingRef, start: iso(hold.start_at), end: iso(hold.end_at), clinicianId: hold.clinician_id, serviceName: svc.name, pricePaise: Number(svc.price_paise) };
+  return { appointmentId: appt.id, bookingRef, start: iso(hold.start_at), end: iso(hold.end_at), clinicianId: hold.clinician_id, serviceName: svc.name, pricePaise: Number(svc.price_paise), modality: svc.modality };
 }
 
 export async function confirmAppointment(actor: Actor, tenant: Tenant, input: z.input<typeof confirmInput>, requestKey?: string | null) {
@@ -415,9 +415,9 @@ export async function dayAppointments(actor: Actor, tenant: Tenant, date: string
   return withTenant(tenant.id, (tx) => tx.many<{
     id: string; booking_ref: string; state: string; version: number; start_at: Date; end_at: Date; source: string; notes: string | null;
     patient_id: string; uhid: string; full_name: string; phone_e164: string | null; patient_status: string;
-    clinician_id: string; clinician_name: string; service_name: string; location_name: string; department_name: string; token_no: number | null;
+    clinician_id: string; clinician_name: string; service_name: string; location_name: string; department_name: string; token_no: number | null; modality: string;
   }>(
-    `SELECT a.id, a.booking_ref, a.state, a.version, lower(a.period) AS start_at, upper(a.period) AS end_at, a.source, a.notes,
+    `SELECT a.id, a.booking_ref, a.state, a.version, a.modality, lower(a.period) AS start_at, upper(a.period) AS end_at, a.source, a.notes,
             p.id AS patient_id, p.uhid, p.full_name, p.phone_e164, p.status AS patient_status,
             c.id AS clinician_id, c.display_name AS clinician_name, s.name AS service_name, l.name AS location_name,
             d.name AS department_name, q.token_no

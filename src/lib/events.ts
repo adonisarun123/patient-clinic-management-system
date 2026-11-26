@@ -27,4 +27,6 @@ export const EVENT_TYPES = [
   'patient.registered', 'appointment.booked', 'appointment.rescheduled', 'appointment.cancelled',
   'appointment.checked_in', 'appointment.no_show', 'appointment.completed', 'prescription.signed',
   'invoice.posted', 'invoice.voided', 'payment.received', 'refund.paid', 'follow_up.created',
+  'result.critical', 'result.final', 'document.released', 'records_request.received', 'patient.admitted', 'patient.discharged',
+  'dispense.completed', 'lot.recalled', 'emergency_access.granted',
 ] as const;

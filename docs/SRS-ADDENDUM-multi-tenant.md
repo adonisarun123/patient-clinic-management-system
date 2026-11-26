@@ -51,8 +51,17 @@ reading is not certain and should be confirmed with counsel before the first cli
 2. Per-tenant export on request, and deletion or return of data at offboarding. Deletion must respect the record-retention holds in SRS chapter 9.
 3. A hosting region and sub-processor list that each clinic can be shown. SRS chapter 6 already notes this for Neon.
 
-## A6. Release scope of this build
-This build implements the SRS **first production release for OPD**. The conditional modules (inpatient/ADT, licensed
-pharmacy stock, laboratory and imaging interfaces, online payment gateway, OTP patient portal, telemedicine, data
-migration tooling) stay inactive until each has its own activation tests, as SRS chapter 1 requires.
-See `SRS-COVERAGE.md`.
+## A6. Module activation
+All conditional modules are built (labs, portal, online payments, telemedicine, restricted records with emergency access,
+pharmacy, inpatient, data import). Each is **off by default per clinic** and can be switched on only by that clinic's
+owner (Settings › Modules). This is how SRS ch. 1's rule is met: a module becomes active only for a clinic that has
+passed its activation tests. Pharmacy and inpatient additionally need sign-off from the pharmacist and the nursing lead.
+
+## A7. Provider choices (adapters)
+| Need | Default | Swappable at | Go-live prerequisite |
+|---|---|---|---|
+| Online payments | Razorpay hosted Checkout + webhook | `src/domain/payments.ts` | Clinic's own Razorpay merchant account (KYC); keys and webhook secret entered in Settings |
+| SMS OTP | MSG91 Flow API | `src/lib/sms.ts` | DLT-registered entity, header and OTP template; MSG91 auth key |
+| Video | Jitsi Meet (configurable base URL) | `src/domain/telemedicine.ts` | Self-hosted Jitsi or a contracted provider; the public meet.jit.si service is not under the clinic's control |
+
+Provider credentials are stored per clinic, encrypted with AES-256-GCM (`APP_ENCRYPTION_KEY`).

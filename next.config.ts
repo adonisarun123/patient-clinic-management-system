@@ -13,9 +13,11 @@ const staffHeaders = [
 
 const config: NextConfig = {
   poweredByHeader: false,
+  // Lab reports and documents up to 10 MB (plus form overhead) and CSV imports.
+  experimental: { serverActions: { bodySizeLimit: '21mb' } },
   async headers() {
     return [
-      { source: '/((?!embed|widget|embed\\.js|api/public).*)', headers: staffHeaders },
+      { source: '/((?!embed|widget|embed\\.js|api/public|api/webhooks).*)', headers: staffHeaders },
       { source: '/embed.js', headers: [{ key: 'Cache-Control', value: 'public, max-age=300' }, { key: 'Access-Control-Allow-Origin', value: '*' }] },
       { source: '/widget/:path*', headers: [{ key: 'Cache-Control', value: 'public, max-age=300' }, { key: 'X-Content-Type-Options', value: 'nosniff' }] },
     ];

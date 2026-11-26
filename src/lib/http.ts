@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { AppError } from './errors';
+import { AppError, toAppError } from './errors';
 import { randomToken } from './crypto';
 import { getTenantBySlug, resolveApiKey, type Tenant } from '@/domain/tenants';
 import { sessionFromToken } from '@/domain/staff';
@@ -33,7 +33,8 @@ export function ok(data: unknown, status = 200, headers: Record<string, string> 
   return NextResponse.json(data, { status, headers: { ...NO_STORE, ...headers } });
 }
 
-export function fail(err: unknown, headers: Record<string, string> = {}) {
+export function fail(errIn: unknown, headers: Record<string, string> = {}) {
+  const err = toAppError(errIn);
   const correlationId = randomToken(8);
   if (err instanceof AppError) return NextResponse.json(err.toJSON(correlationId), { status: err.status, headers: { ...NO_STORE, ...headers } });
   // Never leak internals or patient data into responses; log with the correlation id only.

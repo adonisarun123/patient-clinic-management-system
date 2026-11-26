@@ -63,6 +63,7 @@ export async function findCandidates(tx: Tx, q: { uhid?: string; phone?: string 
        SELECT p.*,
          CASE
            WHEN $1::text IS NOT NULL AND upper(p.uhid) = upper($1) THEN 100
+           WHEN $1::text IS NOT NULL AND EXISTS (SELECT 1 FROM patient_identifier i WHERE i.patient_id = p.id AND upper(i.value) = upper($1)) THEN 95
            WHEN $2::text IS NOT NULL AND p.phone_e164 = $2 AND $3::text IS NOT NULL AND p.name_norm = $3 THEN 90
            WHEN $3::text IS NOT NULL AND p.name_norm = $3 AND $5::int IS NOT NULL AND extract(year FROM p.birth_date) = $5 THEN 80
            WHEN $2::text IS NOT NULL AND p.phone_e164 = $2 THEN 70
@@ -71,7 +72,7 @@ export async function findCandidates(tx: Tx, q: { uhid?: string; phone?: string 
            ELSE 0 END AS score
        FROM patient p WHERE p.status <> 'merged')
      SELECT id, uhid, full_name, birth_date, birth_precision, sex, phone_e164, status, score,
-       CASE WHEN score = 100 THEN 'UHID' WHEN score = 90 THEN 'Phone and name'
+       CASE WHEN score = 100 THEN 'UHID' WHEN score = 95 THEN 'Legacy ID' WHEN score = 90 THEN 'Phone and name'
             WHEN score = 80 THEN 'Name and birth year' WHEN score = 70 THEN 'Same phone (may be family)'
             WHEN score = 50 THEN 'Same name' ELSE 'Similar name' END AS reason
        FROM c WHERE score > 0 ORDER BY score DESC, full_name, id LIMIT $4`,
@@ -85,7 +86,7 @@ export async function searchPatients(actor: Actor, query: string) {
   return withTenant(actor.tenantId, async (tx) => {
     const phone = normalizePhone(q);
     const rows = await findCandidates(tx, {
-      uhid: /^[A-Za-z]{0,6}-?\d+$/.test(q) || /^TMP-/i.test(q) ? q : undefined,
+      uhid: q,
       phone, fullName: phone ? undefined : q,
     }, 25);
     await audit(tx, actor, 'patient.search', 'patient', null, { data: { resultCount: rows.length, kind: phone ? 'phone' : 'text' } });

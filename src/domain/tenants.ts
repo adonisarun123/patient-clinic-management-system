@@ -14,6 +14,19 @@ export type TenantSettings = {
   publicBookingEnabled: boolean;
   requireAllergyReviewToSign: boolean;
   refundApprovalThresholdPaise: number; // refunds at or below can be self-approved by cashier when solo
+  modules: Modules;
+  autoReleasePrescriptions: boolean;    // release signed prescriptions to the portal automatically
+  recordsRequestDays: number;           // response clock for records requests (set by the clinic; verify the legal timeline)
+  emergencyAccessMinutes: number;
+  jitsiBaseUrl: string;
+};
+
+export const MODULES = ['labs', 'portal', 'payments', 'telemedicine', 'emergencyAccess', 'pharmacy', 'inpatient', 'import'] as const;
+export type ModuleName = (typeof MODULES)[number];
+export type Modules = Record<ModuleName, boolean>;
+export const MODULE_LABEL: Record<ModuleName, string> = {
+  labs: 'Lab & imaging orders', portal: 'Patient portal', payments: 'Online payments', telemedicine: 'Video consultations',
+  emergencyAccess: 'Restricted records & emergency access', pharmacy: 'Pharmacy & stock', inpatient: 'Inpatient wards', import: 'Data import',
 };
 
 export type Branding = {
@@ -30,10 +43,38 @@ export const DEFAULT_SETTINGS: TenantSettings = {
   soloPractice: false, uhidPrefix: 'MRN', holdMinutes: 5, noShowGraceMinutes: 30,
   bookingHorizonDays: 60, minLeadMinutes: 30, publicBookingEnabled: true,
   requireAllergyReviewToSign: true, refundApprovalThresholdPaise: 0,
+  modules: { labs: false, portal: false, payments: false, telemedicine: false, emergencyAccess: false, pharmacy: false, inpatient: false, import: false },
+  autoReleasePrescriptions: false, recordsRequestDays: 30, emergencyAccessMinutes: 60, jitsiBaseUrl: 'https://meet.jit.si',
 };
 
+/** SRS ch. 1: conditional modules stay inactive until the clinic switches them on. */
+export function requireModule(t: Tenant, m: ModuleName) {
+  if (!t.settings.modules[m]) throw new AppError('FORBIDDEN', `${MODULE_LABEL[m]} is not enabled for this clinic.`);
+}
+
+export async function setModules(tenant: Tenant, modules: Partial<Modules>, extra: Partial<Pick<TenantSettings, 'autoReleasePrescriptions' | 'recordsRequestDays' | 'emergencyAccessMinutes' | 'jitsiBaseUrl'>> = {}) {
+  const next = { ...tenant.settings.modules, ...modules };
+  await withPlatform((tx) => tx.exec(`UPDATE tenant SET settings = settings || $2::jsonb, updated_at = now() WHERE id = $1`,
+    [tenant.id, JSON.stringify({ modules: next, ...extra })]));
+  invalidateTenantCache(tenant.slug);
+}
+
+/** Encrypted provider credentials per clinic. */
+export async function setSecret(tx: Tx, name: string, value: string, staffIdValue: string | null) {
+  const { encrypt } = await import('@/lib/secrets');
+  await tx.exec(`INSERT INTO tenant_secret (tenant_id, name, ciphertext, hint, updated_by) VALUES (app_tenant_id(), $1, $2, $3, $4)
+                 ON CONFLICT (tenant_id, name) DO UPDATE SET ciphertext = EXCLUDED.ciphertext, hint = EXCLUDED.hint, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [name, encrypt(value), value.length > 8 ? `…${value.slice(-4)}` : '…', staffIdValue]);
+}
+
+export async function getSecret(tx: Tx, name: string): Promise<string | null> {
+  const { decrypt } = await import('@/lib/secrets');
+  const r = await tx.maybe<{ ciphertext: string }>(`SELECT ciphertext FROM tenant_secret WHERE name = $1`, [name]);
+  return r ? decrypt(r.ciphertext) : null;
+}
+
 function hydrate(row: Tenant): Tenant {
-  return { ...row, branding: row.branding ?? {}, settings: { ...DEFAULT_SETTINGS, ...(row.settings ?? {}) } };
+  return { ...row, branding: row.branding ?? {}, settings: { ...DEFAULT_SETTINGS, ...(row.settings ?? {}), modules: { ...DEFAULT_SETTINGS.modules, ...(row.settings?.modules ?? {}) } } };
 }
 
 const cache = new Map<string, { t: Tenant; at: number }>();

@@ -202,7 +202,7 @@ export async function voidInvoice(actor: Actor, tenant: Tenant, invoiceId: strin
 // ------------------------------------------------------------------ payments
 export const paymentInput = z.object({
   patientId: z.uuid(),
-  method: z.enum(['cash', 'upi', 'card', 'bank_transfer', 'cheque', 'other']),
+  method: z.enum(['cash', 'upi', 'card', 'bank_transfer', 'cheque', 'other', 'gateway']),
   amountPaise: z.number().int().positive(),
   reference: z.string().trim().max(120).optional(),
   note: z.string().max(300).optional(),
@@ -211,11 +211,12 @@ export const paymentInput = z.object({
 });
 
 /** POST /v1/payments: externally confirmed tender only (no card data). Receipt number, allocation and journal are atomic. */
-export async function recordPayment(actor: Actor, tenant: Tenant, input: z.input<typeof paymentInput>, requestKey?: string | null) {
+export async function recordPayment(actor: Actor, tenant: Tenant, input: z.input<typeof paymentInput>, requestKey?: string | null, txIn?: Tx) {
   authorize(actor, 'billing.collect');
   const p = paymentInput.parse(input);
   if (!CASH_METHODS.has(p.method) && !p.reference) throw invalid('Enter the transaction reference shown on the UPI/card/bank confirmation');
-  return withTenant(tenant.id, (tx) => idempotent(tx, actorId(actor), 'payment.record', requestKey, p, async () => {
+  const run = (fn: (tx: Tx) => Promise<{ paymentId: string; receiptNo: string; unallocatedPaise: number }>) => (txIn ? fn(txIn) : withTenant(tenant.id, fn));
+  return run((tx) => idempotent(tx, actorId(actor), 'payment.record', requestKey, p, async () => {
     const date = businessDate(tenant.timezone);
     const fy = financialYear(date);
     const n = await tx.one<{ v: number }>(`SELECT next_doc_number($1) AS v`, [`receipt:${fy}`]);

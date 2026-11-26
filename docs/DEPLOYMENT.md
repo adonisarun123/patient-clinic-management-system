@@ -7,7 +7,7 @@
 
 ## First deployment
 1. Create the database. On Neon the default owner role is fine (it is not a superuser and has no `BYPASSRLS`). On self-managed Postgres, create the `pgcrypto` and `btree_gist` extensions as a superuser first.
-2. Set `DATABASE_URL` (with `sslmode=require`) in the host's environment.
+2. Set `DATABASE_URL` (with `sslmode=require`) and `APP_ENCRYPTION_KEY` (`openssl rand -base64 32`) in the host's environment. Never set `ALLOW_DEV_SMS` or `ALLOW_SANDBOX_PAYMENTS` in production.
 3. `npm run db:migrate`. Migrations are checksummed: an edited migration is refused, so add a new file instead.
 4. `npm run admin:create -- you@monkmantra.com "Name"` → sign in at `/admin` and onboard clinics.
 
@@ -18,6 +18,12 @@
 - [ ] Backups and point-in-time restore confirmed and a restore rehearsed (SRS NF-007/009)
 - [ ] Rate limiting: the built-in limiter is per instance. With more than one instance, back it with a shared store (e.g. Upstash Redis)
 - [ ] Data-processing agreement signed with the clinic (see SRS addendum A5)
+- [ ] `APP_ENCRYPTION_KEY` set and backed up separately from the database
+- [ ] Per module switched on: activation tests passed with the clinic (pharmacist for pharmacy, nursing lead for inpatient)
+- [ ] Payments: Razorpay keys + webhook secret entered; webhook URL `https://<host>/api/webhooks/razorpay/<slug>` subscribed to `payment.captured`; one live ₹1 test refunded
+- [ ] Portal: MSG91 auth key + DLT OTP template entered; OTP received on a real phone
+- [ ] Video: Jitsi base URL points to a server the clinic controls or has contracted
+- [ ] File uploads: add antivirus scanning before accepting patient-uploaded files (not built)
 
 ## Two-way GitHub sync for the local folder
 - `npm run sync` — pull (rebase, autostash) from `origin/main`, then push local commits. Never force-pushes. On a conflict it aborts cleanly and exits non-zero.

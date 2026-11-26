@@ -35,6 +35,19 @@ specified in [`docs/SRS-ADDENDUM-multi-tenant.md`](docs/SRS-ADDENDUM-multi-tenan
 | **Website integration** | `embed.js` widget, WordPress plugin, public API, secret-key REST API, signed webhooks | Publishable keys are locked to the clinic's domains (CORS and `frame-ancestors`). Holds are tied to the visitor's journey secret. Rate limits apply |
 | **Platform** | `/admin` console: onboard, suspend and monitor clinics | Separate admin identity and cookie scope |
 
+**Conditional modules** — each off by default, switched on per clinic by its owner (Settings › Modules):
+
+| Module | What it does | Key safeguards |
+|---|---|---|
+| **Lab & imaging** | Orders from the consultation, collection, results with PDF reports, critical-result worklist | Results are append-only versions; acknowledging an old version cannot close an amended one |
+| **Patient portal** | Mobile-OTP sign-in, linked family records, released documents, booking, cancellation, records requests | A phone number alone shows nothing — staff link each chart with evidence; revocation ends sessions |
+| **Online payments** | Razorpay hosted checkout for invoices | Checkout signature and webhook HMAC verified; money recorded once; card data never touches Clinic Core |
+| **Video consultations** | Video services, consent, identity check, Jitsi room, actual mode | Consent and identity recorded before the consult |
+| **Restricted records** | Sensitive charts visible only with a care relationship or break-glass access | Time-limited grant + audit committed together; reviewed by medical records |
+| **Pharmacy** | Dispensing against prescriptions, batch/expiry stock, POs, returns, recalls, blind counts | FEFO; prescribed quantity is a ceiling; stock cannot go negative (DB check); second-person approvals |
+| **Inpatient** | Bed board, admission, transfer, MAR, handover, discharge summary, discharge | Exclusion constraints on beds; one record per scheduled dose; discharge gates |
+| **Data import** | CSV patients and future bookings from an old system | Dry run, duplicate review, repeatable by source id |
+
 `docs/SRS-COVERAGE.md` maps each SRS requirement group to *built / partial / deferred*, so nothing is over-claimed.
 
 ## Quick start (local)
@@ -43,14 +56,15 @@ specified in [`docs/SRS-ADDENDUM-multi-tenant.md`](docs/SRS-ADDENDUM-multi-tenan
 cp .env.example .env            # set DATABASE_URL (role must NOT be superuser/BYPASSRLS)
 npm install
 npm run db:migrate
-npm run db:seed                 # demo clinic + printed logins and website key
+npm run db:seed                 # demo clinic with every module switched on + printed logins and website key
 npm run dev                     # http://localhost:3000/demo-clinic
 npm run worker                  # in a second terminal: webhooks + hold cleanup
 npm run admin:create -- you@monkmantra.com "Your Name"   # platform console at /admin
 ```
 
-Tests run against a real Postgres. They cover tenant isolation, an 8-way race for the last slot, idempotency,
-the end-to-end visit → bill → pay → refund flow, the ledger balance and login:
+Tests run against a real Postgres (18 integration tests). They cover tenant isolation, an 8-way race for the last slot, idempotency,
+the visit → bill → pay → refund flow, the ledger balance, login, and every conditional module (critical-result versions,
+portal family isolation, Razorpay HMAC, break-glass, FEFO and oversell races, MAR, bed exclusivity, import repeatability):
 
 ```bash
 DATABASE_URL=postgres://clinic_app:…@localhost:5432/clinic_test npm test

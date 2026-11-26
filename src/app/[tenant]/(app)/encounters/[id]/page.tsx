@@ -6,6 +6,10 @@ import { can } from '@/lib/rbac';
 import { fmtDateTime } from '@/lib/format';
 import { Badge, Flash, PatientBanner } from '@/components/ui';
 import { RxEditor, type Line } from '@/components/RxEditor';
+import { listTests, patientOrders } from '@/domain/labs';
+import { BreakGlass } from '@/components/BreakGlass';
+import { needsBreakGlass } from '@/lib/gate';
+import { placeOrderAction } from '../../module-actions';
 import { amendNoteAction, amendRxAction, completeEncounterAction, noteAction, rxAction, vitalsAction, allergyAction } from '../../actions';
 
 const toLine = (l: RxLine): Line => ({ drugName: l.drug_name, strength: l.strength ?? '', form: l.form ?? '', dose: l.dose, route: l.route, frequency: l.frequency,
@@ -15,7 +19,12 @@ export default async function Encounter({ params, searchParams }: { params: Prom
   const { tenant: slug, id } = await params;
   const sp = await searchParams;
   const { tenant, actor, session } = await requireStaff(slug, 'clinical.read');
-  const d = await getEncounter(actor, tenant, id);
+  let d: Awaited<ReturnType<typeof getEncounter>>;
+  try { d = await getEncounter(actor, tenant, id); } catch (e) {
+    if (!needsBreakGlass(e)) throw e;
+    const pid = ((e as { details?: { patientId?: string } }).details?.patientId) ?? '';
+    return <BreakGlass slug={slug} patientId={pid} back={`/${slug}/encounters/${id}`} minutes={tenant.settings.emergencyAccessMinutes} />;
+  }
   const p = await getPatient(actor, d.encounter.patient_id);
   const e = d.encounter;
   const open = e.status === 'open';
@@ -27,6 +36,10 @@ export default async function Encounter({ params, searchParams }: { params: Prom
   const signedRx = d.prescriptions.filter((r) => r.status !== 'draft');
   const c: NoteContent = draftNote?.content ?? {};
   const needsAllergy = p.allergy_status === 'not_reviewed';
+  const labsOn = tenant.settings.modules.labs;
+  const tests = labsOn ? (await listTests(tenant.id)).filter((x) => x.active) : [];
+  const orders = labsOn ? await patientOrders(actor, tenant, p.id, id) : [];
+  const ekind = (e as unknown as { kind: string }).kind;
 
   return (
     <>
@@ -37,6 +50,7 @@ export default async function Encounter({ params, searchParams }: { params: Prom
       </div>
       <Flash {...sp} />
       {e.chief_complaint && <p><b>Chief complaint:</b> {e.chief_complaint}</p>}
+      {ekind === 'video' && e.appointment_id && <p><Link className="btn" href={`/${slug}/video/${e.appointment_id}`}>Video room and session record</Link></p>}
 
       <div className="grid2">
         <div className="card">
@@ -97,6 +111,24 @@ export default async function Encounter({ params, searchParams }: { params: Prom
             </div>
           </form>)}
       </div>
+
+      {labsOn && (
+        <div className="card">
+          <h2>Investigations</h2>
+          {orders.length > 0 && <table className="table small"><tbody>{orders.map((o) => (
+            <tr key={o.id}><td><Link href={`/${slug}/labs/${o.id}`}>{o.accession_no}</Link></td><td>{o.test_name}</td><td>{o.priority}</td>
+              <td>{o.value_num ?? o.value_text ?? ''} {o.unit}</td><td><Badge v={o.status} />{o.latest_critical ? <span className="pill danger">Critical</span> : null}</td></tr>))}</tbody></table>}
+          {open && can(session.role, 'orders.write') && session.clinicianId && (
+            <form action={placeOrderAction.bind(null, slug, `/${slug}/encounters/${id}`)} className="form-grid">
+              <input type="hidden" name="patientId" value={p.id} /><input type="hidden" name="encounterId" value={id} />
+              <label className="span2">Tests<select name="testIds" multiple required size={Math.min(8, Math.max(3, tests.length))}>{tests.map((x) => <option key={x.id} value={x.id}>{x.name}{x.kind !== 'lab' ? ` (${x.kind})` : ''}</option>)}</select></label>
+              <label>Priority<select name="priority"><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="stat">STAT</option></select></label>
+              <label>Performed at<select name="destination"><option value="internal">This clinic</option><option value="external">External lab</option></select></label>
+              <label>External lab name<input name="externalLab" /></label>
+              <label>Clinical information<input name="clinicalInfo" /></label>
+              <div className="span2"><button className="btn">Place order</button>{tests.length === 0 && <small className="muted"> Add tests in Lab & imaging › Test catalogue first.</small>}</div>
+            </form>)}
+        </div>)}
 
       <div className="card">
         <h2>Prescription</h2>
