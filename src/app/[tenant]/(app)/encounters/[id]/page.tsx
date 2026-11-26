@@ -6,6 +6,7 @@ import { can } from '@/lib/rbac';
 import { fmtDateTime } from '@/lib/format';
 import { Badge, Flash, PatientBanner } from '@/components/ui';
 import { RxEditor, type Line } from '@/components/RxEditor';
+import { checkDraft } from '@/domain/safety';
 import { listTests, patientOrders } from '@/domain/labs';
 import { BreakGlass } from '@/components/BreakGlass';
 import { needsBreakGlass } from '@/lib/gate';
@@ -141,6 +142,12 @@ export default async function Encounter({ params, searchParams }: { params: Prom
             {r.status === 'signed' && canSign && !draftRx && (
               <form action={amendRxAction.bind(null, slug, id, r.id)} className="inline-form"><input name="reason" placeholder="Reason for amendment" required /><button className="btn small">Amend</button></form>)}
           </div>))}
+        {draftRx && (await checkDraft(actor, tenant, draftRx.id).then((fs) => fs.length ? (
+          <div className="safety-panel">
+            <b>Safety check on the saved draft</b>
+            <ul>{fs.map((f, k) => <li key={k} className={`sev-${f.severity}`}>{f.severity === 'block' ? '⛔' : f.severity === 'warn' ? '⚠️' : 'ℹ️'} {f.message}{f.source ? <small className="muted"> (source: {f.source})</small> : null}</li>)}</ul>
+            {fs.some((f) => f.severity === 'block') && <small>Items marked ⛔ stop signing unless you correct them or give an override reason below (kept in the audit trail).</small>}
+          </div>) : null))}
         {canWrite && (open || draftRx) && (!signedRx.some((r) => r.status === 'signed') || draftRx) && (
           <form action={rxAction.bind(null, slug, id)}>
             {draftRx && <><input type="hidden" name="rxId" value={draftRx.id} /><input type="hidden" name="rowVersion" value={draftRx.row_version} /></>}
@@ -149,13 +156,13 @@ export default async function Encounter({ params, searchParams }: { params: Prom
               <label className="span2">Advice / instructions<textarea name="advice" rows={2} defaultValue={draftRx?.advice ?? ''} /></label>
               <label>Review after (days)<input type="number" name="followUpInDays" min={0} max={3650} defaultValue={draftRx?.follow_up_in_days ?? ''} /></label>
               {needsAllergy && <label className="warnbox">Allergies not reviewed — override reason (or record allergies first)<input name="override" /></label>}
-              {!needsAllergy && <label>Safety override reason (only if the system flags an allergy match)<input name="override" /></label>}
+              {!needsAllergy && <label>Safety override reason (only if the safety check blocks signing)<input name="override" /></label>}
               <label className="check span2"><input type="checkbox" name="patientConfirmed" /> I have confirmed this is {p.full_name} ({p.uhid})</label>
             </div>
             <button className="btn" name="intent" value="save">Save draft</button>{' '}
             {canSign && <button className="btn primary" name="intent" value="sign">Sign prescription</button>}
           </form>)}
-        <p className="muted small">Allergy checks match recorded allergen names only. They are not a drug-interaction database; clinical judgement applies.</p>
+        <p className="muted small">Checks use the clinic’s own formulary and interaction rules (Formulary page) plus recorded allergies. They are only as complete as that data; clinical judgement applies. Save the draft to re-run the check.</p>
       </div>
     </>
   );

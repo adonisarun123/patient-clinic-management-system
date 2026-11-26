@@ -8,6 +8,7 @@ import { financialYear } from '@/lib/money';
 import { chartIds } from './patients';
 import { assertChartAccess } from './access';
 import type { Tenant } from './tenants';
+import { checkLines } from './safety';
 
 const today = (tz: string) => new Date().toLocaleDateString('en-CA', { timeZone: tz });
 
@@ -261,10 +262,12 @@ export async function signPrescription(actor: Actor, tenant: Tenant, rxId: strin
     if (lines.length && patient.allergy_status === 'not_reviewed' && tenant.settings.requireAllergyReviewToSign && !opts.safetyOverrideReason) {
       throw new AppError('RULE_VIOLATION', 'Allergies have not been reviewed for this patient. Record allergies or “no known allergies”, or give an override reason.', { needs: 'allergy_review' });
     }
-    // Simple name match against recorded allergens. Not a substitute for a licensed interaction database.
-    const hits = lines.filter((l) => allergies.some((a) => l.drug_name.toLowerCase().includes(a.substance.toLowerCase()) || a.substance.toLowerCase().includes(l.drug_name.toLowerCase().split(' ')[0])));
-    if (hits.length && !opts.safetyOverrideReason) {
-      throw new AppError('RULE_VIOLATION', `Possible allergy match: ${hits.map((h) => h.drug_name).join(', ')}. Review or give an override reason.`, { needs: 'allergy_override', drugs: hits.map((h) => h.drug_name) });
+    // Allergies (name and drug class), formulary dose limits, weight-based dosing and interaction rules.
+    const findings = await checkLines(tx, tenant, { lines, patientId: rx.patient_id, excludeRxId: rxId });
+    const blocking = findings.filter((f) => f.severity === 'block');
+    if (blocking.length && !opts.safetyOverrideReason?.trim()) {
+      throw new AppError('RULE_VIOLATION', `Safety check: ${blocking.map((b) => b.message).join(' ')} Correct the prescription or give an override reason.`,
+        { needs: 'safety_override', findings: blocking });
     }
     const fy = financialYear(today(tenant.timezone));
     const rxNumber = rx.rx_number ?? `RX/${fy}/${String((await tx.one<{ v: number }>(`SELECT next_doc_number($1) AS v`, [`rx:${fy}`])).v).padStart(6, '0')}`;
@@ -282,13 +285,15 @@ export async function signPrescription(actor: Actor, tenant: Tenant, rxId: strin
         duration: l.duration, quantity: l.quantity, prn: l.prn, prnIndication: l.prn_indication, instructions: l.instructions })),
       advice: rx.advice, followUpInDays: rx.follow_up_in_days, supersedes: rx.supersedes_id ? { id: rx.supersedes_id, reason: rx.amend_reason } : null,
       safetyOverride: opts.safetyOverrideReason ?? null,
+      safetyFindings: findings.filter((f) => f.severity !== 'info'),
     };
     const digest = sha256(canonicalJson(snapshot));
     await tx.exec(`UPDATE prescription SET status = 'signed', rx_number = $2, snapshot = $3, content_digest = $4, signed_by = $5, signed_at = now(),
-                     safety_override_reason = $6 WHERE id = $1`,
-      [rxId, rxNumber, JSON.stringify(snapshot), digest, actor.staffId, opts.safetyOverrideReason ?? null]);
+                     safety_override_reason = $6, safety_findings = $7 WHERE id = $1`,
+      [rxId, rxNumber, JSON.stringify(snapshot), digest, actor.staffId, opts.safetyOverrideReason ?? null, JSON.stringify(findings)]);
     if (rx.supersedes_id) await tx.exec(`UPDATE prescription SET status = 'superseded' WHERE id = $1 AND status = 'signed'`, [rx.supersedes_id]);
-    await audit(tx, actor, 'prescription.signed', 'prescription', rxId, { patientId: rx.patient_id, reason: opts.safetyOverrideReason, data: { rxNumber, digest } });
+    await audit(tx, actor, 'prescription.signed', 'prescription', rxId, { patientId: rx.patient_id, reason: opts.safetyOverrideReason,
+      data: { rxNumber, digest, overridden: blocking.map((b) => b.kind) } });
     await emit(tx, 'prescription.signed', 'prescription', rxId, { rxNumber, encounterId: rx.encounter_id });
     if (tenant.settings.modules.portal && tenant.settings.autoReleasePrescriptions) {
       await tx.exec(`UPDATE document_release SET revoked_at = now() WHERE doc_kind = 'prescription' AND doc_id = $1 AND revoked_at IS NULL`, [rx.supersedes_id]);

@@ -14,7 +14,7 @@ export const PERMISSIONS = [
   'orders.write', 'results.enter', 'results.ack', 'portal.manage', 'records.requests',
   'pharmacy.dispense', 'pharmacy.stock', 'pharmacy.approve', 'inpatient.admit', 'inpatient.nursing', 'inpatient.discharge',
   'emergency.review', 'import.run', 'telemedicine.conduct',
-  'finance.close', 'claims.manage',
+  'finance.close', 'claims.manage', 'formulary.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -43,7 +43,7 @@ const GRANTS: Record<Role, Set<Permission>> = {
   ]),
   records: new Set<Permission>(['patient.read', 'patient.write', 'patient.merge', 'clinical.read', 'audit.read', 'schedule.read',
     'portal.manage', 'records.requests', 'emergency.review', 'import.run']),
-  pharmacist: new Set<Permission>(['patient.read', 'schedule.read', 'clinical.read', 'pharmacy.dispense', 'pharmacy.stock', 'billing.read', 'billing.charge']),
+  pharmacist: new Set<Permission>(['patient.read', 'schedule.read', 'clinical.read', 'pharmacy.dispense', 'pharmacy.stock', 'billing.read', 'billing.charge', 'formulary.manage']),
   lab: new Set<Permission>(['patient.read', 'schedule.read', 'results.enter']),
 };
 
