@@ -222,8 +222,10 @@ export async function confirmInTx(tx: Tx, actor: Actor, tenant: Tenant, p: z.inf
     `SELECT booking_ref FROM appointment WHERE patient_id = $1 AND state IN ('booked','arrived','in_service')
         AND period && tstzrange($2, $3, '[)')`, [p.patientId, hold.start_at, hold.end_at]);
   if (clash) throw rule('This patient already has an appointment at an overlapping time.');
+  // CFG-008: the price that applies on the visit's local date (a scheduled change may start after booking).
   const svc = await tx.one<{ department_id: string; price_paise: number; version: number; name: string; modality: string }>(
-    `SELECT department_id, price_paise, version, name, modality FROM service WHERE id = $1`, [hold.service_id]);
+    `SELECT department_id, service_price_on(id, ($2::timestamptz AT TIME ZONE $3)::date) AS price_paise, version, name, modality FROM service WHERE id = $1`,
+    [hold.service_id, hold.start_at, tenant.timezone]);
   const n = await tx.one<{ v: number }>(`SELECT next_doc_number('booking') AS v`);
   const bookingRef = `BK${String(n.v).padStart(6, '0')}`;
   const appt = await tx.one<{ id: string; version: number }>(

@@ -58,7 +58,7 @@ export async function addCharge(actor: Actor, tenant: Tenant, input: z.input<typ
     let desc = p.description; let price = p.unitPricePaise; let tax = 0; let dept: string | null = null;
     if (p.serviceId) {
       const s = await tx.one<{ name: string; price_paise: number; tax_rate_bp: number; department_id: string }>(
-        `SELECT name, price_paise, tax_rate_bp, department_id FROM service WHERE id = $1`, [p.serviceId]);
+        `SELECT name, service_price_on(id, $2::date) AS price_paise, tax_rate_bp, department_id FROM service WHERE id = $1`, [p.serviceId, businessDate(tenant.timezone)]);
       desc ??= s.name; price ??= Number(s.price_paise); tax = s.tax_rate_bp; dept = s.department_id;
       // Overriding a published tariff needs discount authority, just like a discount.
       if (p.unitPricePaise != null && p.unitPricePaise !== Number(s.price_paise)) authorize(actor, 'discount.apply');
@@ -175,6 +175,10 @@ export async function voidInvoice(actor: Actor, tenant: Tenant, invoiceId: strin
       `SELECT * FROM invoice WHERE id = $1 FOR UPDATE`, [invoiceId]);
     if (!inv) throw notFound('Invoice');
     if (inv.status !== 'posted') throw rule('Only a posted invoice can be voided');
+    // FN-021: once a month is closed (returns may already be filed), its invoices stay; correct with a refund instead.
+    const closed = await tx.maybe(`SELECT 1 FROM accounting_period ap JOIN invoice i ON i.id = $1
+       WHERE ap.period_start = date_trunc('month', i.business_date)::date AND ap.status = 'closed'`, [invoiceId]);
+    if (closed) throw rule('This invoice belongs to a closed accounting month and cannot be voided. Issue a refund or credit instead, or ask the owner to reopen the month.');
     const date = businessDate(tenant.timezone);
     const a = await accounts(tx);
     const perPayment = await tx.many<{ payment_id: string; net: number }>(
@@ -322,7 +326,7 @@ export async function payRefund(actor: Actor, tenant: Tenant, refundId: string, 
     const tender = r.method === 'cash' ? a.cash : a.clearing;
     await postJournal(tx, tenant, actor, { kind: 'refund', id: r.id, key: `refund:${r.id}`, date, memo: 'Refund paid', patientId: r.patient_id },
       [{ account: a.advances, debit: Number(r.amount_paise) }, { account: tender, credit: Number(r.amount_paise) }]);
-    await tx.exec(`UPDATE refund SET status = 'paid', paid_reference = $2, paid_at = now(), business_date = $3 WHERE id = $1`, [refundId, reference ?? null, date]);
+    await tx.exec(`UPDATE refund SET status = 'paid', paid_reference = $2, paid_at = now(), business_date = $3, paid_by = $4 WHERE id = $1`, [refundId, reference ?? null, date, staffId(actor)]);
     await audit(tx, actor, 'refund.paid', 'refund', refundId, { patientId: r.patient_id, data: { amount: r.amount_paise } });
     await emit(tx, 'refund.paid', 'refund', refundId, { amountPaise: Number(r.amount_paise) });
   });

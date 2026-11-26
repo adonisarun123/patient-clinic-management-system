@@ -20,6 +20,7 @@ const NAV: { href: string; label: string; perm: Permission; module?: ModuleName 
   { href: '/pharmacy', label: 'Pharmacy', perm: 'pharmacy.dispense', module: 'pharmacy' },
   { href: '/billing', label: 'Billing', perm: 'billing.read' },
   { href: '/reports', label: 'Reports', perm: 'reports.read' },
+  { href: '/accounts', label: 'Accounts', perm: 'finance.close' },
   { href: '/records-requests', label: 'Records requests', perm: 'records.requests', module: 'portal' },
   { href: '/emergency-access', label: 'Emergency access', perm: 'emergency.review', module: 'emergencyAccess' },
   { href: '/import', label: 'Data import', perm: 'import.run', module: 'import' },

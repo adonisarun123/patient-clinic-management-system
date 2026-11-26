@@ -144,3 +144,5 @@ pre.code { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8p
 .letter { max-width: 760px; } .letter h3 { margin: 14px 0 4px; font-size: 1rem; } .letter-head { border-bottom: 1px solid var(--border); margin-bottom: 10px; }
 .letter .signature { margin-top: 28px; border-top: 1px dashed var(--border); padding-top: 8px; }
 tr.highlight td { background: #ecfdf5; }
+.denoms { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); gap: 8px; margin: 8px 0; } .denoms input { width: 100%; }
+.warn-text { color: #b45309; font-weight: 600; }

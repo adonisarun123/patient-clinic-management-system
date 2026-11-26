@@ -357,7 +357,7 @@ export async function completeEncounter(actor: Actor, tenant: Tenant, encounterI
     let charged = false;
     if (e.service_id) {
       const svc = await tx.one<{ name: string; price_paise: number; tax_rate_bp: number; department_id: string; follow_up_free_days: number }>(
-        `SELECT name, price_paise, tax_rate_bp, department_id, follow_up_free_days FROM service WHERE id = $1`, [e.service_id]);
+        `SELECT name, service_price_on(id, (now() AT TIME ZONE $2)::date) AS price_paise, tax_rate_bp, department_id, follow_up_free_days FROM service WHERE id = $1`, [e.service_id, tenant.timezone]);
       const appt = e.appointment_id ? await tx.maybe<{ quoted_price_paise: number }>(`SELECT quoted_price_paise FROM appointment WHERE id = $1`, [e.appointment_id]) : null;
       let price = appt ? Number(appt.quoted_price_paise) : Number(svc.price_paise);
       let note: string | null = null;

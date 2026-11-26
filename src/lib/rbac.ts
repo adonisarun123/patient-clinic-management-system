@@ -14,6 +14,7 @@ export const PERMISSIONS = [
   'orders.write', 'results.enter', 'results.ack', 'portal.manage', 'records.requests',
   'pharmacy.dispense', 'pharmacy.stock', 'pharmacy.approve', 'inpatient.admit', 'inpatient.nursing', 'inpatient.discharge',
   'emergency.review', 'import.run', 'telemedicine.conduct',
+  'finance.close',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
