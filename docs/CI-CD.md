@@ -49,3 +49,10 @@ Deployment page › **Force Promote**. Record why in the commit or the incident 
 npx tsx scripts/check-migrations.ts origin/main   # migration rules vs. main
 node scripts/smoke.mjs https://<deployment-url>   # smoke-test any deployment
 ```
+
+## Where it is configured
+- GitHub: `.github/workflows/ci.yml` (jobs `verify`, `audit`), `.github/workflows/post-deploy.yml` (job `smoke`,
+  status `Vercel - clinic-core: smoke`), `.github/dependabot.yml`.
+- Vercel › clinic-core › Settings › Git: `repository_dispatch` events **on** (needed for the smoke test).
+- Vercel › clinic-core › Settings › Build and Deployment › Deployment Checks: `verify`, `audit` and
+  `Vercel - clinic-core: smoke`, all for Production.
