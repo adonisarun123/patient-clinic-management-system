@@ -68,7 +68,10 @@ async function run<T>(tenantId: string | null, fn: (tx: Tx) => Promise<T>): Prom
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
-    if (tenantId) await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantId]);
+    // Every transaction computes in UTC regardless of the server's default, so date/time SQL behaves identically on
+    // a developer laptop, CI and Neon. Clinic-local times are always converted explicitly with AT TIME ZONE.
+    if (tenantId) await client.query(`SELECT set_config('app.tenant_id', $1, true), set_config('TimeZone', 'UTC', true)`, [tenantId]);
+    else await client.query(`SELECT set_config('TimeZone', 'UTC', true)`);
     const result = await fn(new Tx(client, tenantId));
     await client.query('COMMIT');
     return result;

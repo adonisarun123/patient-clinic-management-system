@@ -134,7 +134,9 @@ async function materialiseDoses(tx: Tx, tz: string, orderId: string, hours = 36)
      SELECT app_tenant_id(), o.id, o.admission_id, ((d.day + t.hhmm::time) AT TIME ZONE $2)
        FROM med_order o
        CROSS JOIN LATERAL unnest(o.schedule_times) AS t(hhmm)
-       CROSS JOIN LATERAL generate_series((now() AT TIME ZONE $2)::date, ((now() + make_interval(hours => $3)) AT TIME ZONE $2)::date, interval '1 day') AS d(day)
+       -- ::date matters: generate_series over dates yields timestamptz, and timestamptz + time AT TIME ZONE converts
+       -- the wrong way (result then depended on the server's TimeZone setting).
+       CROSS JOIN LATERAL (SELECT g::date AS day FROM generate_series((now() AT TIME ZONE $2)::date, ((now() + make_interval(hours => $3)) AT TIME ZONE $2)::date, interval '1 day') g) AS d
       WHERE o.id = $1 AND o.status = 'active' AND NOT o.prn
         AND ((d.day + t.hhmm::time) AT TIME ZONE $2) >= o.start_at
         AND ((d.day + t.hhmm::time) AT TIME ZONE $2) < now() + make_interval(hours => $3)
