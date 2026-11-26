@@ -1,7 +1,8 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertTenantKey, objectStorageEnabled } from '../src/lib/blob';
-import { withPlatform } from '../src/lib/db';
+import { withPlatform, pool } from '../src/lib/db';
+after(async () => { await pool().end(); });
 
 test('object storage keys must belong to the clinic; DB enforces one location and tenant prefix', async () => {
   const t = '11111111-1111-4111-8111-111111111111';

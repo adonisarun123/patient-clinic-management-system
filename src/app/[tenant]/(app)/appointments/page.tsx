@@ -7,6 +7,7 @@ import { maskPhone } from '@/lib/identity';
 import { fmtDateTime, fmtTime, today } from '@/lib/format';
 import { Badge, Empty, Flash, PageHead } from '@/components/ui';
 import { apptAction } from '../actions';
+import { seriesAction } from '../frontdesk-actions';
 
 function shift(date: string, n: number) { const d = new Date(`${date}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 
@@ -58,7 +59,7 @@ export default async function Appointments({ params, searchParams }: { params: P
             <thead><tr><th>Time</th><th>Patient</th><th>Doctor · room</th><th>Service</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>{rows.map((a) => (
               <tr key={a.id} className={a.state === 'cancelled' ? 'dim' : ''}>
-                <td>{fmtTime(a.start_at, tenant)}<br /><small className="muted">{a.booking_ref}</small></td>
+                <td>{fmtTime(a.start_at, tenant)}<br /><small className="muted">{a.booking_ref}</small>{a.series_id && <><br /><span className="pill">Course {a.series_seq}/{a.series_total}</span></>}</td>
                 <td><Link href={`/${slug}/patients/${a.patient_id}`}><b>{a.full_name}</b></Link><br /><small className="muted">{a.uhid} · {maskPhone(a.phone_e164)}</small>
                   {a.patient_status === 'provisional' && <><br /><span className="pill warn">Online booking — confirm identity</span></>}</td>
                 <td>{a.clinician_name}<br /><small className="muted">{a.location_name}</small></td>
@@ -80,6 +81,8 @@ export default async function Appointments({ params, searchParams }: { params: P
                           <input name="reason" placeholder="Cancellation reason" required /><button className="btn small danger">Cancel</button>
                         </form>
                         <form action={apptAction.bind(null, slug, a.id, backHere)}><input type="hidden" name="op" value="noshow" /><button className="btn small">Mark no-show</button></form>
+                        {a.series_id && <form action={seriesAction.bind(null, slug)} className="inline-form"><input type="hidden" name="op" value="cancel" /><input type="hidden" name="seriesId" value={a.series_id} /><input type="hidden" name="back" value={backHere} />
+                          <input name="reason" placeholder="Why stop the course?" required /><button className="btn small danger">Cancel rest of course</button></form>}
                       </div>
                     </details>)}
                   {['no_show', 'cancelled'].includes(a.state) && can(session.role, 'schedule.override') && (

@@ -120,7 +120,7 @@ type HoldResult = { holdId: string; expiresAt: string; clinicianId: string; loca
  * OP-019: lock resource rows in canonical id order, release elapsed holds on them, re-read availability and insert
  * all claims or none. The exclusion constraint is the final guard; a lost race returns fresh alternatives.
  */
-async function createHoldTx(tx: Tx, actor: Actor, tenant: Tenant, input: z.infer<typeof holdInput>): Promise<HoldResult> {
+export async function createHoldTx(tx: Tx, actor: Actor, tenant: Tenant, input: z.infer<typeof holdInput>): Promise<HoldResult> {
   const start = new Date(input.start);
   if (Number.isNaN(+start)) throw invalid('Invalid start time');
   const svc = await tx.maybe<{ duration_min: number; buffer_before_min: number; buffer_after_min: number; public_bookable: boolean }>(
@@ -334,8 +334,32 @@ export async function cancelAppointment(actor: Actor, tenant: Tenant, appointmen
     await releaseClaims(tx, a.id);
     await recordTransition(tx, actor, a, 'cancelled', 'cancelled', reason, { patientInitiated: !!opts.patientInitiated });
     await emit(tx, 'appointment.cancelled', 'appointment', a.id, { bookingRef: a.booking_ref, start: iso(a.start_at) });
+    await offerFreedSlot(tx, tenant, a);
     return { state: 'cancelled' };
   });
+}
+
+/**
+ * OP-028: a cancelled future slot is flagged on the waitlist entries it fits (same service, doctor if one was
+ * requested, inside the patient's date window and time-of-day preference), most urgent and longest-waiting first.
+ * Staff call the patient and book; nothing is booked automatically.
+ */
+async function offerFreedSlot(tx: Tx, tenant: Tenant, a: Appt) {
+  if (+a.start_at <= Date.now()) return;
+  const hits = await tx.many<{ id: string; patient_id: string }>(
+    `WITH slot AS (SELECT ($1::timestamptz AT TIME ZONE $4) AS local)
+     UPDATE waitlist_entry w SET match_start = $1, match_clinician = $3, matched_at = now(), updated_at = now()
+      WHERE w.id IN (
+        SELECT w2.id FROM waitlist_entry w2, slot
+         WHERE w2.status = 'waiting' AND w2.service_id = $2 AND (w2.clinician_id IS NULL OR w2.clinician_id = $3)
+           AND slot.local::date BETWEEN w2.earliest_date AND w2.latest_date
+           AND (w2.time_pref = 'any'
+                OR (w2.time_pref = 'morning' AND extract(hour FROM slot.local) < 12)
+                OR (w2.time_pref = 'afternoon' AND extract(hour FROM slot.local) >= 12 AND extract(hour FROM slot.local) < 17)
+                OR (w2.time_pref = 'evening' AND extract(hour FROM slot.local) >= 17))
+         ORDER BY w2.priority DESC, w2.created_at LIMIT 5)
+      RETURNING w.id, w.patient_id`, [a.start_at, a.service_id, a.clinician_id, tenant.timezone]);
+  for (const h of hits) await emit(tx, 'waitlist.slot_available', 'waitlist_entry', h.id, { start: iso(a.start_at), clinicianId: a.clinician_id, serviceId: a.service_id, patientId: h.patient_id });
 }
 
 /** OP-025: no-show only after the configured grace period for an unarrived appointment. */
@@ -416,8 +440,9 @@ export async function dayAppointments(actor: Actor, tenant: Tenant, date: string
     id: string; booking_ref: string; state: string; version: number; start_at: Date; end_at: Date; source: string; notes: string | null;
     patient_id: string; uhid: string; full_name: string; phone_e164: string | null; patient_status: string;
     clinician_id: string; clinician_name: string; service_name: string; location_name: string; department_name: string; token_no: number | null; modality: string;
+    series_id: string | null; series_seq: number | null; series_total: number | null;
   }>(
-    `SELECT a.id, a.booking_ref, a.state, a.version, a.modality, lower(a.period) AS start_at, upper(a.period) AS end_at, a.source, a.notes,
+    `SELECT a.id, a.booking_ref, a.state, a.version, a.modality, a.series_id, a.series_seq, (SELECT count(*)::int FROM appointment x WHERE x.series_id = a.series_id) AS series_total, lower(a.period) AS start_at, upper(a.period) AS end_at, a.source, a.notes,
             p.id AS patient_id, p.uhid, p.full_name, p.phone_e164, p.status AS patient_status,
             c.id AS clinician_id, c.display_name AS clinician_name, s.name AS service_name, l.name AS location_name,
             d.name AS department_name, q.token_no

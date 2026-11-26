@@ -7,6 +7,8 @@ import { birthLabel } from '@/lib/identity';
 import { fmtDateTime, fmtTime, money, today } from '@/lib/format';
 import { Empty, Flash, PageHead, PatientBanner, RequestKey } from '@/components/ui';
 import { apptAction, bookAction } from '../../actions';
+import { seriesAction, waitlistAction } from '../../frontdesk-actions';
+import { isoToLocalInput } from '@/lib/format';
 
 type Sp = { q?: string; patientId?: string; serviceId?: string; clinicianId?: string; date?: string; reschedule?: string; ok?: string; err?: string };
 
@@ -81,6 +83,34 @@ export default async function NewAppointment({ params, searchParams }: { params:
                       <button className="slot">{fmtTime(s.start, tenant)}<small>{name(s.clinicianId)}</small></button>
                     </form>))}</div>
                 ))}
+            </div>
+          )}
+          {service && !resched && (
+            <div className="grid2">
+              <form action={seriesAction.bind(null, slug)} className="card form-grid">
+                <h2 className="span2">Repeat visits</h2>
+                <p className="small muted span2">Books a course (e.g. physiotherapy twice a week) at the same clock time. All visits are checked against the diary.</p>
+                <input type="hidden" name="patientId" value={patient.id} /><input type="hidden" name="serviceId" value={service.id} /><input type="hidden" name="back" value={keep({})} />
+                <label>Doctor<select name="clinicianId" defaultValue={sp.clinicianId ?? ''} required>{cat.clinicians.filter((c) => service.clinician_ids.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{c.display_name}</option>)}</select></label>
+                <label>First visit<input type="datetime-local" name="firstStart" required defaultValue={avail?.slots[0] ? isoToLocalInput(avail.slots[0].start, tenant.timezone) : ''} /></label>
+                <label>Repeat<select name="freq"><option value="weekly">Weekly</option><option value="daily">Daily</option></select></label>
+                <label>Every<input type="number" name="everyN" min={1} max={8} defaultValue={1} /></label>
+                <label>Number of visits<input type="number" name="count" min={2} max={52} defaultValue={6} required /></label>
+                <label className="check"><input type="checkbox" name="skip" /> Skip dates that are not free (otherwise book nothing)</label>
+                <div className="span2"><button className="btn primary">Book series</button></div>
+              </form>
+              <form action={waitlistAction.bind(null, slug)} className="card form-grid">
+                <h2 className="span2">Add to waitlist</h2>
+                <p className="small muted span2">No suitable time? The patient is flagged when a matching slot is cancelled.</p>
+                <input type="hidden" name="op" value="add" /><input type="hidden" name="patientId" value={patient.id} /><input type="hidden" name="serviceId" value={service.id} /><input type="hidden" name="back" value={keep({})} />
+                <label>Doctor<select name="clinicianId" defaultValue={sp.clinicianId ?? ''}><option value="">Any eligible</option>{cat.clinicians.filter((c) => service.clinician_ids.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{c.display_name}</option>)}</select></label>
+                <label>Time of day<select name="timePref"><option value="any">Any</option><option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="evening">Evening</option></select></label>
+                <label>From<input type="date" name="earliestDate" defaultValue={date} min={today(tenant)} required /></label>
+                <label>Until<input type="date" name="latestDate" required /></label>
+                <label>Priority<select name="priority"><option value="0">Routine</option><option value="1">Soon</option><option value="2">Urgent</option></select></label>
+                <label>Note<input name="notes" /></label>
+                <div className="span2"><button className="btn">Add to waitlist</button></div>
+              </form>
             </div>
           )}
         </>

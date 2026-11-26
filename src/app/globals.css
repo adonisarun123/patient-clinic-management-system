@@ -140,3 +140,7 @@ pre.code { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8p
 .list-cards { display: grid; gap: 8px; }
 .recovery-codes { font-size: 1.05rem; letter-spacing: .05em; background: var(--panel, #f8fafc); padding: .75rem 1rem; border-radius: 8px; columns: 2; }
 .secret-key { display: inline-block; margin: .5rem 0; font-size: 1rem; letter-spacing: .08em; word-break: break-all; }
+.prewrap { white-space: pre-wrap; }
+.letter { max-width: 760px; } .letter h3 { margin: 14px 0 4px; font-size: 1rem; } .letter-head { border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.letter .signature { margin-top: 28px; border-top: 1px dashed var(--border); padding-top: 8px; }
+tr.highlight td { background: #ecfdf5; }

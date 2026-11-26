@@ -13,6 +13,8 @@ const NAV: { href: string; label: string; perm: Permission; module?: ModuleName 
   { href: '/queue', label: 'Queue', perm: 'schedule.read' },
   { href: '/patients', label: 'Patients', perm: 'patient.read' },
   { href: '/follow-ups', label: 'Follow-ups', perm: 'schedule.read' },
+  { href: '/waitlist', label: 'Waitlist', perm: 'schedule.read' },
+  { href: '/referrals', label: 'Referrals', perm: 'patient.read' },
   { href: '/labs', label: 'Lab & imaging', perm: 'schedule.read', module: 'labs' },
   { href: '/inpatient', label: 'Inpatient', perm: 'schedule.read', module: 'inpatient' },
   { href: '/pharmacy', label: 'Pharmacy', perm: 'pharmacy.dispense', module: 'pharmacy' },

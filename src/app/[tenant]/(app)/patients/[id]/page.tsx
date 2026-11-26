@@ -15,6 +15,8 @@ import { BreakGlass } from '@/components/BreakGlass';
 import { FileField } from '@/components/FileField';
 import { objectStorageEnabled } from '@/lib/blob';
 import { needsBreakGlass } from '@/lib/gate';
+import { listReferrals, listReferrers } from '@/domain/frontdesk';
+import { referralAction } from '../../frontdesk-actions';
 import { uploadDocAction, docErrorAction, portalLinkAction, restrictAction, releaseAction, returnAction } from '../../module-actions';
 import { allergyAction, allergyStatusAction, confirmIdentityAction, linkPatientAction, updatePatientAction, walkInAction, followUpAction } from '../../actions';
 
@@ -43,6 +45,8 @@ export default async function PatientChart({ params, searchParams }: { params: P
   const linkResults = sp.link ? (await searchPatients(actor, sp.link)).filter((r) => r.id !== id && r.status !== 'merged') : [];
   const activeAllergies = (t?.allergies ?? []).filter((a) => (a as { status: string }).status === 'active') as { id: string; substance: string; reaction: string | null; severity: string | null }[];
   const back = `/${slug}/patients/${id}`;
+  const referrals = await listReferrals(actor, tenant, { patientId: id });
+  const referrers = can(session.role, 'patient.write') || can(session.role, 'clinical.write') ? (await listReferrers(actor, tenant)).filter((r) => r.active) : [];
 
   if (p.status === 'merged' && p.merged_into_id) {
     return <div className="card"><p>This record ({p.uhid}) was linked into another chart.</p><Link className="btn primary" href={`/${slug}/patients/${p.merged_into_id}`}>Open surviving chart</Link></div>;
@@ -223,6 +227,30 @@ export default async function PatientChart({ params, searchParams }: { params: P
             <tr key={r.id}><td>Prescription {r.rx_number}</td><td>{fmtDateTime(r.signed_at, tenant)}</td>
               <td><form action={releaseAction.bind(null, slug, back)} className="inline-form"><input type="hidden" name="patientId" value={id} /><input type="hidden" name="kind" value="prescription" /><input type="hidden" name="docId" value={r.id} />
                 {isReleased('prescription', r.id) ? <><input type="hidden" name="op" value="revoke" /><span className="pill ok">In portal</span><button className="btn small">Remove</button></> : <button className="btn small">Release to portal</button>}</form></td></tr>))}</tbody></table></div>)}
+
+      <div className="card"><h2>Referrals</h2>
+        {referrals.length === 0 ? <Empty>No referrals.</Empty> : <table className="table small"><tbody>{referrals.map((r) => (
+          <tr key={r.id}><td><Link href={`/${slug}/referrals/${r.id}`}>{r.ref_number}</Link></td><td>{r.direction === 'inbound' ? `From ${r.referrer_name ?? '—'}` : `To ${r.referrer_name ?? r.to_specialty ?? '—'}`}</td>
+            <td>{r.reason.slice(0, 70)}</td><td>{label(r.status)}</td><td>{fmtDate(r.created_at, tenant)}</td></tr>))}</tbody></table>}
+        <div className="grid2">
+          {can(session.role, 'patient.write') && (referrers.length ? (
+            <form action={referralAction.bind(null, slug)} className="form-grid"><input type="hidden" name="op" value="inbound" /><input type="hidden" name="patientId" value={id} /><input type="hidden" name="back" value={back} />
+              <h3 className="span2">Record a referral we received</h3>
+              <label>Referred by<select name="referrerId" required>{referrers.map((r) => <option key={r.id} value={r.id}>{r.name}{r.organisation ? ` · ${r.organisation}` : ''}</option>)}</select></label>
+              <label>Urgency<select name="urgency"><option value="routine">Routine</option><option value="soon">Soon</option><option value="urgent">Urgent</option></select></label>
+              <label className="span2">Reason<input name="reason" required minLength={3} /></label>
+              <div className="span2"><button className="btn small">Record</button></div>
+            </form>) : <p className="small muted">Add referring doctors under <Link href={`/${slug}/referrals?tab=referrers`}>Referrals › Referring doctors</Link> to record inbound referrals.</p>)}
+          {can(session.role, 'clinical.write') && (
+            <form action={referralAction.bind(null, slug)} className="form-grid"><input type="hidden" name="op" value="draft" /><input type="hidden" name="patientId" value={id} /><input type="hidden" name="back" value={back} />
+              <h3 className="span2">Refer this patient out</h3>
+              <label>To<select name="referrerId"><option value="">(specialty only)</option>{referrers.map((r) => <option key={r.id} value={r.id}>{r.name}{r.specialty ? ` · ${r.specialty}` : ''}</option>)}</select></label>
+              <label>Specialty<input name="toSpecialty" /></label>
+              <label className="span2">Reason<input name="reason" required minLength={5} /></label>
+              <div className="span2"><button className="btn small">Draft letter</button></div>
+            </form>)}
+        </div>
+      </div>
 
       {t && (
         <div className="card"><h2>Documents</h2>

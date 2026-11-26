@@ -24,6 +24,7 @@ export async function emit(tx: Tx, type: string, aggregateKind: string, aggregat
 }
 
 export const EVENT_TYPES = [
+  'waitlist.slot_available', 'referral.received', 'referral.sent',
   'patient.registered', 'appointment.booked', 'appointment.rescheduled', 'appointment.cancelled',
   'appointment.checked_in', 'appointment.no_show', 'appointment.completed', 'prescription.signed',
   'invoice.posted', 'invoice.voided', 'payment.received', 'refund.paid', 'follow_up.created',

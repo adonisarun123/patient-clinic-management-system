@@ -1,8 +1,9 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 import { makeClinic } from './helpers';
-import { withTenant } from '../src/lib/db';
+import { withTenant, pool } from '../src/lib/db';
+after(async () => { await pool().end(); });
 import { AppError, toAppError } from '../src/lib/errors';
 import { hotp, currentStep, verifyTotp, base32Decode, base32Encode } from '../src/lib/totp';
 import { login, completeTwoFactorLogin, beginTwoFactor, confirmTwoFactor, resetStaffTwoFactor, sessionFromToken, disableTwoFactor } from '../src/domain/staff';
