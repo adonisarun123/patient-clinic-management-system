@@ -31,10 +31,19 @@ export default async function Admission({ params, searchParams }: { params: Prom
   return (
     <>
       <PatientBanner p={p} slug={slug} />
-      <PageHead title={`Admission ${a.admission_no}`} sub={`${a.department} · ${a.clinician} · admitted ${fmtDateTime(a.admitted_at, tenant)} · ${a.reason}`}>
+      <PageHead title={`${a.care_type === 'daycare' ? 'Day care' : 'Admission'} ${a.admission_no}`} sub={`${a.department} · ${a.clinician} · admitted ${fmtDateTime(a.admitted_at, tenant)} · ${a.reason}`}>
         <Badge v={a.status} /><Link className="btn" href={`/${slug}/encounters/${a.encounter_id}`}>Notes, vitals & orders</Link>
       </PageHead>
       <Flash {...sp} />
+      {a.care_type === 'daycare' && a.status === 'admitted' && (
+        <div className={`card ${a.planned_end_at && new Date(a.planned_end_at) < new Date() ? 'warnbox' : ''}`}>
+          <p>Day care — expected discharge {a.planned_end_at ? fmtDateTime(a.planned_end_at, tenant) : '—'}{a.planned_end_at && new Date(a.planned_end_at) < new Date() ? ' (overdue)' : ''}.</p>
+          {tenant.settings.modules.inpatient && can(session.role, 'inpatient.admit') ? (
+            <form action={admissionAction.bind(null, slug, id)} className="inline-form"><input type="hidden" name="op" value="convert" />
+              <input name="reason" required minLength={5} placeholder="Clinical reason for overnight stay" /><button className="btn small">Convert to inpatient</button></form>
+          ) : <p className="small muted">Overnight stays need the Inpatient module; otherwise arrange transfer.</p>}
+        </div>)}
+      {a.converted_reason && <p className="small muted">Converted from day care: {a.converted_reason}</p>}
       <div className="grid2">
         <div className="card"><h2>Bed</h2>
           <table className="table small"><tbody>{d.stays.map((s, i) => <tr key={i}><td>{s.ward} · {s.code}</td><td>{fmtDateTime(s.start, tenant)} → {s.end ? fmtDateTime(s.end, tenant) : 'now'}</td><td>{s.reason}</td></tr>)}</tbody></table>

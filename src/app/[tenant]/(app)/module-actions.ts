@@ -1,4 +1,5 @@
 'use server';
+import { localToIso } from '@/lib/format';
 // Server actions for the conditional modules. Each re-authenticates, checks the module switch and the permission.
 import { s, opt, num, run } from '@/lib/action-helpers';
 import { AppError } from '@/lib/errors';
@@ -214,9 +215,13 @@ export async function bedAction(slug: string, f: FormData) {
 }
 
 export async function admitAction(slug: string, f: FormData) {
-  await run(slug, `/${slug}/inpatient`, async ({ actor, tenant }) => {
+  const dc = s(f, 'careType') === 'daycare';
+  await run(slug, dc ? `/${slug}/daycare` : `/${slug}/inpatient`, async ({ actor, tenant }) => {
+    const endTime = s(f, 'plannedEndTime');
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: tenant.timezone });
     const r = await ip.admit(actor, tenant, { patientId: s(f, 'patientId'), bedId: s(f, 'bedId'), departmentId: s(f, 'departmentId'), admittingClinicianId: s(f, 'clinicianId'),
-      reason: s(f, 'reason'), expectedDischarge: opt(f, 'expectedDischarge') });
+      reason: s(f, 'reason'), expectedDischarge: opt(f, 'expectedDischarge'), careType: dc ? 'daycare' : 'inpatient',
+      plannedEndAt: dc && endTime ? localToIso(`${today}T${endTime}`, tenant.timezone) : undefined });
     return { redirect: `/${slug}/inpatient/${r.admissionId}`, msg: `Admitted ${r.admissionNo}` };
   });
 }
@@ -226,6 +231,7 @@ export async function admissionAction(slug: string, admissionId: string, f: Form
     const op = s(f, 'op');
     switch (op) {
       case 'transfer': await ip.transferBed(actor, tenant, admissionId, s(f, 'bedId'), s(f, 'reason')); return 'Transferred';
+      case 'convert': { const r = await ip.convertToInpatient(actor, tenant, admissionId, s(f, 'reason')); return `${r.admissionNo} is now an inpatient stay`; }
       case 'order': {
         const times = s(f, 'times').split(/[\s,]+/).filter(Boolean);
         await ip.orderMedication(actor, tenant, admissionId, { drugName: s(f, 'drugName'), dose: s(f, 'dose'), route: s(f, 'route') || 'oral', scheduleTimes: times,

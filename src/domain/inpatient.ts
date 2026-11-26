@@ -7,6 +7,11 @@ import { canonicalJson, sha256 } from '@/lib/crypto';
 import { requireModule, type Tenant } from './tenants';
 import { assertChartAccess } from './access';
 
+/** Beds, orders, MAR and discharge serve both inpatient wards and day care. */
+function requireWard(tenant: Tenant) {
+  if (!tenant.settings.modules.inpatient && !tenant.settings.modules.daycare) requireModule(tenant, 'inpatient');
+}
+
 /**
  * Inpatient care (CL-036–039, HS-001–008). An admission owns an inpatient encounter, so notes, vitals, orders and
  * prescriptions reuse the outpatient record. Bed occupancy uses two exclusion constraints (one patient per bed,
@@ -15,7 +20,7 @@ import { assertChartAccess } from './access';
 const localDay = (d: Date | string, tz: string) => new Date(d).toLocaleDateString('en-CA', { timeZone: tz });
 
 export async function upsertBed(actor: Actor, tenant: Tenant, b: { id?: string; wardId: string; code: string; category?: string; dailyRatePaise: number; active?: boolean }) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'settings.manage');
   if (!b.code?.trim()) throw invalid('Bed code is required');
   return withTenant(tenant.id, async (tx) => {
@@ -36,7 +41,7 @@ export type BedBoardRow = { bed_id: string; code: string; category: string; stat
 
 /** HS-002 live bed board. */
 export async function bedBoard(actor: Actor, tenant: Tenant) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'schedule.read');
   return withTenant(tenant.id, (tx) => tx.many<BedBoardRow>(
     `SELECT b.id AS bed_id, b.code, b.category, b.status, b.ward_id, w.name AS ward, b.daily_rate_paise,
@@ -50,13 +55,21 @@ export async function bedBoard(actor: Actor, tenant: Tenant) {
 export const admitInput = z.object({
   patientId: z.uuid(), bedId: z.uuid(), departmentId: z.uuid(), admittingClinicianId: z.uuid(), reason: z.string().trim().min(3).max(1000),
   sourceEncounterId: z.uuid().nullish(), expectedDischarge: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  careType: z.enum(['inpatient', 'daycare']).default('inpatient'),
+  plannedEndAt: z.iso.datetime({ offset: true }).optional(),          // day care: expected discharge time
 });
 
 /** HS-001: one active admission per patient; the bed is claimed in the same transaction. */
 export async function admit(actor: Actor, tenant: Tenant, input: z.input<typeof admitInput>) {
-  requireModule(tenant, 'inpatient');
-  authorize(actor, 'inpatient.admit');
   const p = admitInput.parse(input);
+  requireModule(tenant, p.careType === 'daycare' ? 'daycare' : 'inpatient');
+  authorize(actor, 'inpatient.admit');
+  if (p.careType === 'daycare') {
+    if (!p.plannedEndAt) throw invalid('Give the expected discharge time for day care');
+    const end = new Date(p.plannedEndAt);
+    const day = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: tenant.timezone });
+    if (end.getTime() <= Date.now() || day(end) !== day(new Date())) throw invalid('Day-care discharge must be later today; admit as an inpatient for an overnight stay');
+  }
   return withTenant(tenant.id, async (tx) => {
     const pt = await tx.maybe<{ status: string }>(`SELECT status FROM patient WHERE id = $1 FOR UPDATE`, [p.patientId]);
     if (!pt || pt.status === 'merged') throw notFound('Patient');
@@ -65,15 +78,17 @@ export async function admit(actor: Actor, tenant: Tenant, input: z.input<typeof 
     const enc = await tx.one<{ id: string }>(
       `INSERT INTO encounter (tenant_id, patient_id, department_id, lead_clinician_id, kind, chief_complaint, created_by) VALUES (app_tenant_id(), $1,$2,$3,'inpatient',$4,$5) RETURNING id`,
       [p.patientId, p.departmentId, p.admittingClinicianId, p.reason, staffId(actor)]);
-    const n = await tx.one<{ v: number }>(`SELECT next_doc_number('admission') AS v`);
+    const dc = p.careType === 'daycare';
+    const n = await tx.one<{ v: number }>(`SELECT next_doc_number($1) AS v`, [dc ? 'daycare' : 'admission']);
     const adm = await tx.one<{ id: string; admission_no: string }>(
-      `INSERT INTO admission (tenant_id, admission_no, patient_id, encounter_id, source_encounter_id, department_id, admitting_clinician_id, reason, expected_discharge, created_by)
-       VALUES (app_tenant_id(), $1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, admission_no`,
-      [`IP${String(n.v).padStart(6, '0')}`, p.patientId, enc.id, p.sourceEncounterId ?? null, p.departmentId, p.admittingClinicianId, p.reason, p.expectedDischarge ?? null, staffId(actor)])
+      `INSERT INTO admission (tenant_id, admission_no, patient_id, encounter_id, source_encounter_id, department_id, admitting_clinician_id, reason, expected_discharge, created_by, care_type, planned_end_at)
+       VALUES (app_tenant_id(), $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, admission_no`,
+      [`${dc ? 'DC' : 'IP'}${String(n.v).padStart(6, '0')}`, p.patientId, enc.id, p.sourceEncounterId ?? null, p.departmentId, p.admittingClinicianId, p.reason,
+        dc ? new Date(p.plannedEndAt!).toLocaleDateString('en-CA', { timeZone: tenant.timezone }) : p.expectedDischarge ?? null, staffId(actor), p.careType, dc ? p.plannedEndAt : null])
       .catch((e: AppError) => { if (e.code === 'CONFLICT') throw rule('This patient is already admitted'); throw e; });
     await tx.exec(`INSERT INTO bed_stay (tenant_id, admission_id, bed_id, period, reason, moved_by) VALUES (app_tenant_id(), $1, $2, tstzrange(now(), NULL, '[)'), 'admission', $3)`,
       [adm.id, p.bedId, staffId(actor)]).catch((e: AppError) => { if (e.code === 'SLOT_TAKEN') throw rule('That bed was just taken'); throw e; });
-    await audit(tx, actor, 'admission.created', 'admission', adm.id, { patientId: p.patientId, data: { admissionNo: adm.admission_no } });
+    await audit(tx, actor, 'admission.created', 'admission', adm.id, { patientId: p.patientId, data: { admissionNo: adm.admission_no, careType: p.careType } });
     await emit(tx, 'patient.admitted', 'admission', adm.id, { admissionNo: adm.admission_no });
     return { admissionId: adm.id, admissionNo: adm.admission_no, encounterId: enc.id };
   });
@@ -81,7 +96,7 @@ export async function admit(actor: Actor, tenant: Tenant, input: z.input<typeof 
 
 /** HS-003: close the old stay and open the new one at the same instant; failure keeps the original bed. */
 export async function transferBed(actor: Actor, tenant: Tenant, admissionId: string, toBedId: string, reason: string) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'inpatient.nursing');
   if (!reason?.trim()) throw invalid('Give the reason for transfer');
   return withTenant(tenant.id, async (tx) => {
@@ -100,7 +115,7 @@ export async function transferBed(actor: Actor, tenant: Tenant, admissionId: str
 }
 
 export async function setBedStatus(actor: Actor, tenant: Tenant, bedId: string, status: 'available' | 'cleaning' | 'blocked') {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'inpatient.nursing');
   return withTenant(tenant.id, async (tx) => {
     if (status !== 'available') {
@@ -149,7 +164,7 @@ async function materialiseDoses(tx: Tx, tz: string, orderId: string, hours = 36)
  * completed doses stay, untouched future doses are superseded, and new occurrences are emitted once (HS-007).
  */
 export async function orderMedication(actor: Actor, tenant: Tenant, admissionId: string, input: z.input<typeof medOrderInput>) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'clinical.sign');
   if (actor.kind !== 'staff' || !actor.clinicianId) throw new AppError('FORBIDDEN', 'Only a clinician can order medicines');
   const p = medOrderInput.parse(input);
@@ -178,7 +193,7 @@ export async function orderMedication(actor: Actor, tenant: Tenant, admissionId:
 }
 
 export async function stopMedication(actor: Actor, tenant: Tenant, orderId: string, reason: string) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'clinical.sign');
   if (!reason?.trim()) throw invalid('Give the reason');
   return withTenant(tenant.id, async (tx) => {
@@ -197,7 +212,7 @@ export const doseInput = z.object({
 
 /** Record one scheduled dose. A second recording of the same occurrence is refused (one dose per occurrence). */
 export async function recordDose(actor: Actor, tenant: Tenant, doseId: string, input: z.input<typeof doseInput>) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'inpatient.nursing');
   const p = doseInput.parse(input);
   if (!p.patientConfirmed) throw rule('Confirm the patient’s identity band before recording a dose');
@@ -218,7 +233,7 @@ export async function recordDose(actor: Actor, tenant: Tenant, doseId: string, i
 
 /** PRN administration: a new occurrence row with no due time. */
 export async function recordPrnDose(actor: Actor, tenant: Tenant, orderId: string, input: z.input<typeof doseInput>) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'inpatient.nursing');
   const p = doseInput.parse(input);
   if (!p.patientConfirmed) throw rule('Confirm the patient’s identity band before recording a dose');
@@ -236,7 +251,7 @@ export async function recordPrnDose(actor: Actor, tenant: Tenant, orderId: strin
 
 // ------------------------------------------------------------------ handover (HS-004)
 export async function createHandover(actor: Actor, tenant: Tenant, admissionId: string, toStaffId: string, summary: string) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'inpatient.nursing');
   if (!summary?.trim()) throw invalid('Write the handover summary');
   return withTenant(tenant.id, async (tx) => {
@@ -265,7 +280,7 @@ export const dischargeSummaryInput = z.object({
 
 /** Signs the discharge summary as an immutable clinical note on the admission's encounter. */
 export async function signDischargeSummary(actor: Actor, tenant: Tenant, admissionId: string, input: z.input<typeof dischargeSummaryInput>) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'inpatient.discharge');
   if (actor.kind !== 'staff' || !actor.clinicianId) throw new AppError('FORBIDDEN', 'A clinician must sign the discharge summary');
   const p = dischargeSummaryInput.parse(input);
@@ -316,7 +331,7 @@ export const dischargeInput = z.object({
  * all active medication orders stopped, and financial clearance — bills settled, or a named authorisation for credit.
  */
 export async function discharge(actor: Actor, tenant: Tenant, admissionId: string, input: z.input<typeof dischargeInput>) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'inpatient.discharge');
   const p = dischargeInput.parse(input);
   return withTenant(tenant.id, async (tx) => {
@@ -346,13 +361,43 @@ export async function discharge(actor: Actor, tenant: Tenant, admissionId: strin
   });
 }
 
+/** A day-care patient who must stay overnight becomes an inpatient: same admission, bed and orders; audited. */
+export async function convertToInpatient(actor: Actor, tenant: Tenant, admissionId: string, reason: string) {
+  requireModule(tenant, 'inpatient');
+  authorize(actor, 'inpatient.admit');
+  if (!reason?.trim() || reason.trim().length < 5) throw invalid('Give the clinical reason for the overnight stay');
+  return withTenant(tenant.id, async (tx) => {
+    const a = await lockAdmission(tx, admissionId);
+    const cur = await tx.one<{ care_type: string; admission_no: string }>(`SELECT care_type, admission_no FROM admission WHERE id = $1`, [admissionId]);
+    if (cur.care_type !== 'daycare') throw rule('This is already an inpatient admission');
+    await tx.exec(`UPDATE admission SET care_type='inpatient', converted_at=now(), converted_reason=$2, expected_discharge=NULL, version=version+1 WHERE id=$1`, [admissionId, reason.trim()]);
+    await audit(tx, actor, 'admission.converted_to_inpatient', 'admission', admissionId, { patientId: a.patient_id, reason });
+    return { admissionNo: cur.admission_no };
+  });
+}
+
+/** Day-care board: today's day-care patients, flagged when past their expected discharge time. */
+export async function dayCareBoard(actor: Actor, tenant: Tenant) {
+  requireModule(tenant, 'daycare');
+  authorize(actor, 'clinical.read');
+  return withTenant(tenant.id, (tx) => tx.many<{ id: string; admission_no: string; patient_id: string; full_name: string; uhid: string; reason: string; admitted_at: Date;
+    planned_end_at: Date | null; bed: string | null; overdue: boolean; status: string; discharged_at: Date | null; summary_signed: boolean }>(
+    `SELECT a.id, a.admission_no, a.patient_id, p.full_name, p.uhid, a.reason, a.admitted_at, a.planned_end_at, a.status, a.discharged_at,
+            (SELECT b.code FROM bed_stay s JOIN bed b ON b.id = s.bed_id WHERE s.admission_id = a.id ORDER BY lower(s.period) DESC LIMIT 1) AS bed,
+            (a.status = 'admitted' AND a.planned_end_at < now()) AS overdue, a.discharge_summary_id IS NOT NULL AS summary_signed
+       FROM admission a JOIN patient p ON p.id = a.patient_id
+      WHERE a.care_type = 'daycare' AND (a.status = 'admitted' OR (a.admitted_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date)
+      ORDER BY a.status, a.planned_end_at`, [tenant.timezone]));
+}
+
 // ------------------------------------------------------------------ reads
 export async function admissionDetail(actor: Actor, tenant: Tenant, admissionId: string) {
-  requireModule(tenant, 'inpatient');
+  requireWard(tenant);
   authorize(actor, 'clinical.read');
   return withTenant(tenant.id, async (tx) => {
     const a = await tx.maybe<{ id: string; admission_no: string; patient_id: string; encounter_id: string; status: string; reason: string; admitted_at: Date; discharged_at: Date | null;
-      disposition: string | null; expected_discharge: string | null; clinician: string; department: string; discharge_summary_id: string | null; financial_clearance: string | null }>(
+      disposition: string | null; expected_discharge: string | null; clinician: string; department: string; discharge_summary_id: string | null; financial_clearance: string | null;
+      care_type: string; planned_end_at: Date | null; converted_reason: string | null }>(
       `SELECT a.*, c.display_name AS clinician, d.name AS department FROM admission a JOIN clinician c ON c.id = a.admitting_clinician_id JOIN department d ON d.id = a.department_id WHERE a.id = $1`, [admissionId]);
     if (!a) throw notFound('Admission');
     await assertChartAccess(tx, actor, tenant, a.patient_id);

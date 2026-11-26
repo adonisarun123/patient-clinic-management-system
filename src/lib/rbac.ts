@@ -13,6 +13,7 @@ export const PERMISSIONS = [
   // conditional modules
   'orders.write', 'results.enter', 'results.ack', 'portal.manage', 'records.requests',
   'pharmacy.dispense', 'pharmacy.stock', 'pharmacy.approve', 'inpatient.admit', 'inpatient.nursing', 'inpatient.discharge',
+  'theatre.schedule', 'theatre.checklist',
   'emergency.review', 'import.run', 'telemedicine.conduct',
   'finance.close', 'claims.manage', 'formulary.manage',
 ] as const;
@@ -27,15 +28,15 @@ const GRANTS: Record<Role, Set<Permission>> = {
     'patient.read', 'patient.write', 'schedule.read', 'schedule.book', 'queue.manage', 'queue.triage',
     'clinical.read', 'clinical.write', 'clinical.sign', 'vitals.write', 'billing.read', 'billing.charge',
     'discount.apply', 'reports.read', 'orders.write', 'results.enter', 'results.ack', 'inpatient.admit', 'inpatient.nursing',
-    'inpatient.discharge', 'telemedicine.conduct', 'portal.manage',
+    'inpatient.discharge', 'telemedicine.conduct', 'portal.manage', 'theatre.schedule', 'theatre.checklist',
   ]),
   nurse: new Set<Permission>([
     'patient.read', 'patient.write', 'schedule.read', 'queue.manage', 'queue.triage',
-    'clinical.read', 'vitals.write', 'results.enter', 'inpatient.nursing',
+    'clinical.read', 'vitals.write', 'results.enter', 'inpatient.nursing', 'theatre.checklist',
   ]),
   reception: new Set<Permission>([
     'patient.read', 'patient.write', 'schedule.read', 'schedule.book', 'queue.manage',
-    'billing.read', 'billing.charge', 'billing.post', 'billing.collect', 'refund.request', 'portal.manage', 'inpatient.admit', 'claims.manage',
+    'billing.read', 'billing.charge', 'billing.post', 'billing.collect', 'refund.request', 'portal.manage', 'inpatient.admit', 'claims.manage', 'theatre.schedule',
   ]),
   cashier: new Set<Permission>([
     'patient.read', 'schedule.read', 'billing.read', 'billing.charge', 'billing.post', 'billing.collect',

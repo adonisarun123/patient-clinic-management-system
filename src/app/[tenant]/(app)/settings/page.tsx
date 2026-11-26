@@ -255,6 +255,8 @@ const MODULE_NOTE: Record<string, string> = {
   pharmacy: 'Licensed dispensing, batch and expiry stock, purchase orders, recalls, counts. Needs pharmacist sign-off.',
   inpatient: 'Beds, admissions, transfers, medication administration, discharge. Needs nursing and medical sign-off.',
   import: 'Bring patients and future bookings from an old system with a dry run first.',
+  daycare: 'Same-day admissions (chemotherapy, dialysis, minor procedures) on day-care beds, with overstay alerts and conversion to inpatient.',
+  theatre: 'Theatre lists with clash prevention, WHO Surgical Safety Checklist, operation notes, consumables and charges. Needs surgical sign-off.',
 };
 
 async function ModulesTab({ slug, tenant, host, canToggle }: { slug: string; tenant: Awaited<ReturnType<typeof requireStaff>>['tenant']; host: string; canToggle: boolean }) {

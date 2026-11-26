@@ -13,7 +13,7 @@ export default async function Inpatient({ params, searchParams }: { params: Prom
   const { tenant: slug } = await params;
   const sp = await searchParams;
   const { tenant, actor, session } = await requireStaff(slug, 'schedule.read');
-  requireModule(tenant, 'inpatient');
+  if (!tenant.settings.modules.daycare) requireModule(tenant, 'inpatient');
   const board = await bedBoard(actor, tenant);
   const cat = await listCatalog(tenant.id);
   const wards = cat.locations.filter((l) => l.kind === 'ward' && l.active);

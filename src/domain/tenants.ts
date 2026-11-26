@@ -25,12 +25,13 @@ export type TenantSettings = {
   formularyMode: 'off' | 'warn' | 'enforce'; // off-formulary prescribing: ignore, warn, or require a reason
 };
 
-export const MODULES = ['labs', 'portal', 'payments', 'telemedicine', 'emergencyAccess', 'pharmacy', 'inpatient', 'import'] as const;
+export const MODULES = ['labs', 'portal', 'payments', 'telemedicine', 'emergencyAccess', 'pharmacy', 'inpatient', 'import', 'daycare', 'theatre'] as const;
 export type ModuleName = (typeof MODULES)[number];
 export type Modules = Record<ModuleName, boolean>;
 export const MODULE_LABEL: Record<ModuleName, string> = {
   labs: 'Lab & imaging orders', portal: 'Patient portal', payments: 'Online payments', telemedicine: 'Video consultations',
   emergencyAccess: 'Restricted records & emergency access', pharmacy: 'Pharmacy & stock', inpatient: 'Inpatient wards', import: 'Data import',
+  daycare: 'Day care', theatre: 'Operating theatre',
 };
 
 export type Branding = {
@@ -47,7 +48,7 @@ export const DEFAULT_SETTINGS: TenantSettings = {
   soloPractice: false, uhidPrefix: 'MRN', holdMinutes: 5, noShowGraceMinutes: 30,
   bookingHorizonDays: 60, minLeadMinutes: 30, publicBookingEnabled: true,
   requireAllergyReviewToSign: true, refundApprovalThresholdPaise: 0,
-  modules: { labs: false, portal: false, payments: false, telemedicine: false, emergencyAccess: false, pharmacy: false, inpatient: false, import: false },
+  modules: { labs: false, portal: false, payments: false, telemedicine: false, emergencyAccess: false, pharmacy: false, inpatient: false, import: false, daycare: false, theatre: false },
   autoReleasePrescriptions: false, recordsRequestDays: 30, emergencyAccessMinutes: 60, jitsiBaseUrl: 'https://meet.jit.si',
   twoFactorRoles: [],
   drawerVarianceApprovalPaise: 10000,

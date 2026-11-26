@@ -41,7 +41,7 @@ export function fromPg(err: unknown): unknown {
   const e = err as { code?: string; constraint?: string; message?: string };
   if (!e || typeof e !== 'object' || !e.code) return err;
   switch (e.code) {
-    case '23P01': return new AppError('SLOT_TAKEN', 'That time was just taken by another booking.');
+    case '23P01': return new AppError('SLOT_TAKEN', 'That time was just taken by another booking.', { constraint: e.constraint });
     case '23505': return new AppError('CONFLICT', 'A record with the same unique value already exists.', { constraint: e.constraint });
     case '23514': return new AppError('VALIDATION', 'A value is outside the permitted range.', { constraint: e.constraint });
     case '23503': return new AppError('VALIDATION', 'A referenced record does not exist.', { constraint: e.constraint });
