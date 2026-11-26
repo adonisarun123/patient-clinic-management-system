@@ -1,31 +1,80 @@
+# CI — runs on every push and pull request.
+# The `verify` and `audit` job names are registered as Vercel Deployment Checks: a production deployment is built,
+# but not put live on the production domain until both pass for its commit. Renaming a job breaks that link —
+# update Vercel › Project › Settings › Build and Deployment › Deployment Checks if you do.
 name: CI
 on:
   push: { branches: [main] }
   pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16
+        # Production runs Postgres 18 on Neon; test against the same major version.
+        image: postgres:18
         env: { POSTGRES_PASSWORD: postgres }
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgres://clinic_app:clinic@localhost:5432/clinic_test
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+
+      - name: Migration rules (no edits to shipped migrations, additive-only new ones)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npx tsx scripts/check-migrations.ts "$BASE"
+
+      - name: Create a non-superuser app role so row-level security is really enforced
+        env: { PGPASSWORD: postgres }
+        run: |
+          psql -h localhost -U postgres -c "CREATE ROLE clinic_app LOGIN PASSWORD 'clinic' NOSUPERUSER NOBYPASSRLS"
+          for db in clinic_test clinic_upgrade; do
+            psql -h localhost -U postgres -c "CREATE DATABASE $db OWNER clinic_app"
+            psql -h localhost -U postgres -d $db -c "CREATE EXTENSION pgcrypto; CREATE EXTENSION btree_gist;"
+          done
+
+      - name: Migrations apply to an empty database, and re-running is a no-op
+        run: npm run db:migrate && npm run db:migrate
+
+      - name: Migrations apply on top of the previous release's schema (the path production takes)
+        env:
+          DATABASE_URL: postgres://clinic_app:clinic@localhost:5432/clinic_upgrade
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && ! echo "$BASE" | grep -qE '^0+$' && git cat-file -e "$BASE" 2>/dev/null; then
+            D=$(mktemp -d)
+            git archive "$BASE" db/migrations | tar -x -C "$D" --strip-components=2
+            MIGRATIONS_DIR="$D" npm run db:migrate
+          fi
+          npm run db:migrate
+
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env: { DATABASE_URL: 'postgres://unused@localhost/unused' }
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - name: Create a non-superuser app role so row-level security is actually enforced in tests
-        env: { PGPASSWORD: postgres }
-        run: |
-          psql -h localhost -U postgres -c "CREATE ROLE clinic_app LOGIN PASSWORD 'clinic' NOSUPERUSER NOBYPASSRLS"
-          psql -h localhost -U postgres -c "CREATE DATABASE clinic_test OWNER clinic_app"
-          psql -h localhost -U postgres -d clinic_test -c "CREATE EXTENSION pgcrypto; CREATE EXTENSION btree_gist;"
-      - run: npm run db:migrate
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - name: No high or critical vulnerabilities in production dependencies
+        run: npm audit --omit=dev --audit-level=high

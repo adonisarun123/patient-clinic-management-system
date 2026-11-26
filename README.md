@@ -79,9 +79,10 @@ DATABASE_URL=postgres://clinic_app:…@localhost:5432/clinic_test npm test
 
 ## Deploy
 
-See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). The short version: deploy on Vercel (or any Node 20+ host) with Neon
-Postgres in an Indian region, and run `npm run worker` as a long-running process, or `npm run worker -- --once` from a
-1-minute cron.
+Production runs on Vercel (project `clinic-core`, functions in `sin1`) with Neon Postgres and a private Vercel Blob
+store; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Every push to `main` is built by Vercel and goes live only after
+CI, the dependency audit and a post-deploy smoke test pass — see [`docs/CI-CD.md`](docs/CI-CD.md). On other Node 22
+hosts, run `npm run worker` alongside the app instead of the Vercel cron.
 
 ## Repository layout
 

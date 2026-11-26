@@ -1,0 +1,37 @@
+# Post-deploy smoke test against the exact deployment Vercel just built.
+# Vercel sends `vercel.deployment.ready` before Deployment Checks run. This job's status
+# ("Vercel - clinic-core: smoke") is a required Deployment Check, so a production build that fails it never reaches
+# the production domain. Preview deployments sit behind Vercel Authentication, so only production is tested.
+# Note: repository_dispatch workflows only run from the copy of this file on the default branch (main).
+name: Post-deploy smoke
+on:
+  repository_dispatch:
+    types: [vercel.deployment.ready]
+  workflow_dispatch:
+    inputs:
+      url: { description: 'Deployment URL to test', required: true }
+permissions:
+  contents: read
+  statuses: write
+  actions: read
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.client_payload.environment == 'production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.git.sha || github.sha }}
+      - name: Report status to Vercel Deployment Checks
+        if: github.event_name == 'repository_dispatch'
+        uses: vercel/repository-dispatch/actions/status@v1
+        with:
+          name: 'Vercel - clinic-core: smoke'
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Smoke test
+        env:
+          TARGET: ${{ github.event.client_payload.url || inputs.url }}
+        run: node scripts/smoke.mjs "$TARGET"

@@ -11,7 +11,7 @@ async function main() {
   const client = new Client({ connectionString: url, ssl: /sslmode=require|neon\.tech/.test(url) ? { rejectUnauthorized: true } : undefined });
   await client.connect();
   await client.query(`CREATE TABLE IF NOT EXISTS schema_migration (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`);
-  const dir = join(process.cwd(), 'db', 'migrations');
+  const dir = process.env.MIGRATIONS_DIR || join(process.cwd(), 'db', 'migrations');
   const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
   const applied = new Map((await client.query<{ name: string; checksum: string }>(`SELECT name, checksum FROM schema_migration`)).rows.map((r) => [r.name, r.checksum]));
   for (const f of files) {
