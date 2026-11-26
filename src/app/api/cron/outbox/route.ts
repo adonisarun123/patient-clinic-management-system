@@ -21,5 +21,6 @@ export async function GET(req: Request) {
     if (Date.now() + 10_000 > until) break;
     await new Promise((res) => setTimeout(res, 5_000));
   } while (Date.now() < until);
+  console.log(JSON.stringify({ cron: 'outbox', passes, events, sent }));
   return Response.json({ passes, events, sent });
 }
