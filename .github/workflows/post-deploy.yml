@@ -29,7 +29,7 @@ jobs:
         uses: vercel/repository-dispatch/actions/status@v1
         with:
           name: 'Vercel - clinic-core: smoke'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - name: Smoke test
         env:
