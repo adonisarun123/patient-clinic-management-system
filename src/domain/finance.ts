@@ -12,7 +12,7 @@ const businessDate = (tz: string) => new Date().toLocaleDateString('en-CA', { ti
 /** Indian currency notes and coins in common use (₹). Counts × face value = counted cash. */
 export const DENOMINATIONS = [2000, 500, 200, 100, 50, 20, 10, 5, 2, 1] as const;
 
-async function ensureAccount(tx: Tx, code: string, name: string, type: string) {
+export async function ensureAccount(tx: Tx, code: string, name: string, type: string) {
   await tx.exec(`INSERT INTO ledger_account (tenant_id, code, name, type) VALUES (app_tenant_id(), $1, $2, $3) ON CONFLICT (tenant_id, code) DO NOTHING`, [code, name, type]);
   return (await tx.one<{ id: string }>(`SELECT id FROM ledger_account WHERE code = $1`, [code])).id;
 }

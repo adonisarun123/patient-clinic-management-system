@@ -12,7 +12,7 @@ import type { Tenant } from './tenants';
 const businessDate = (tz: string) => new Date().toLocaleDateString('en-CA', { timeZone: tz });
 const CASH_METHODS = new Set(['cash']);
 
-async function accounts(tx: Tx) {
+export async function accounts(tx: Tx) {
   const rows = await tx.many<{ id: string; code: string }>(`SELECT id, code FROM ledger_account`);
   const m = new Map(rows.map((r) => [r.code, r.id]));
   const get = (c: string) => { const id = m.get(c); if (!id) throw new AppError('INTERNAL', `Ledger account ${c} missing`); return id; };
@@ -22,7 +22,7 @@ async function accounts(tx: Tx) {
 type Leg = { account: string; debit?: number; credit?: number };
 
 /** Writes one balanced journal. The deferred trigger re-checks the balance at commit. */
-async function postJournal(tx: Tx, tenant: Tenant, actor: Actor, src: { kind: string; id: string; key: string; date: string; memo: string; patientId?: string; reverses?: string }, legs: Leg[]) {
+export async function postJournal(tx: Tx, tenant: Tenant, actor: Actor, src: { kind: string; id: string; key: string; date: string; memo: string; patientId?: string; reverses?: string }, legs: Leg[]) {
   const lines = legs.filter((l) => (l.debit ?? 0) > 0 || (l.credit ?? 0) > 0);
   const d = lines.reduce((s, l) => s + (l.debit ?? 0), 0);
   const c = lines.reduce((s, l) => s + (l.credit ?? 0), 0);
@@ -179,6 +179,8 @@ export async function voidInvoice(actor: Actor, tenant: Tenant, invoiceId: strin
     const closed = await tx.maybe(`SELECT 1 FROM accounting_period ap JOIN invoice i ON i.id = $1
        WHERE ap.period_start = date_trunc('month', i.business_date)::date AND ap.status = 'closed'`, [invoiceId]);
     if (closed) throw rule('This invoice belongs to a closed accounting month and cannot be voided. Issue a refund or credit instead, or ask the owner to reopen the month.');
+    const claimed = await tx.maybe(`SELECT 1 FROM claim WHERE invoice_id = $1 AND claimed_paise - returned_paise > 0`, [invoiceId]);
+    if (claimed) throw rule('An insurance claim is raised on this invoice. Withdraw it (or record the payer’s rejection) before voiding.');
     const date = businessDate(tenant.timezone);
     const a = await accounts(tx);
     const perPayment = await tx.many<{ payment_id: string; net: number }>(
@@ -360,7 +362,7 @@ export async function invoiceDetail(actor: Actor, tenant: Tenant, invoiceId: str
     if (!invoice) throw notFound('Invoice');
     const lines = await tx.many<{ description: string; quantity: number; unit_price_paise: number; discount_paise: number; tax_paise: number; tax_rate_bp: number; line_total_paise: number }>(
       `SELECT * FROM invoice_line WHERE invoice_id = $1 ORDER BY id`, [invoiceId]);
-    const balance = await tx.one<{ paid_paise: number; due_paise: number }>(`SELECT paid_paise, due_paise FROM invoice_balance WHERE invoice_id = $1`, [invoiceId]);
+    const balance = await tx.one<{ paid_paise: number; due_paise: number; payer_paise: number }>(`SELECT paid_paise, due_paise, payer_paise FROM invoice_balance WHERE invoice_id = $1`, [invoiceId]);
     const allocations = await tx.many(`SELECT a.*, p.receipt_no, p.method FROM allocation a JOIN payment p ON p.id = a.payment_id WHERE a.invoice_id = $1 ORDER BY a.created_at`, [invoiceId]);
     return { invoice, lines, balance, allocations };
   });

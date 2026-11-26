@@ -17,6 +17,9 @@ import { objectStorageEnabled } from '@/lib/blob';
 import { needsBreakGlass } from '@/lib/gate';
 import { listReferrals, listReferrers } from '@/domain/frontdesk';
 import { referralAction } from '../../frontdesk-actions';
+import { listPayers, patientPolicies, listPreauths } from '@/domain/insurance';
+import { insuranceAction } from '../../insurance-actions';
+import { money } from '@/lib/format';
 import { uploadDocAction, docErrorAction, portalLinkAction, restrictAction, releaseAction, returnAction } from '../../module-actions';
 import { allergyAction, allergyStatusAction, confirmIdentityAction, linkPatientAction, updatePatientAction, walkInAction, followUpAction } from '../../actions';
 
@@ -46,6 +49,10 @@ export default async function PatientChart({ params, searchParams }: { params: P
   const activeAllergies = (t?.allergies ?? []).filter((a) => (a as { status: string }).status === 'active') as { id: string; substance: string; reaction: string | null; severity: string | null }[];
   const back = `/${slug}/patients/${id}`;
   const referrals = await listReferrals(actor, tenant, { patientId: id });
+  const canIns = can(session.role, 'billing.read');
+  const policies = canIns ? await patientPolicies(actor, tenant, id) : [];
+  const payers = can(session.role, 'claims.manage') ? (await listPayers(actor, tenant)).filter((p) => p.active) : [];
+  const preauths = canIns ? await listPreauths(actor, tenant, { patientId: id }) : [];
   const referrers = can(session.role, 'patient.write') || can(session.role, 'clinical.write') ? (await listReferrers(actor, tenant)).filter((r) => r.active) : [];
 
   if (p.status === 'merged' && p.merged_into_id) {
@@ -227,6 +234,36 @@ export default async function PatientChart({ params, searchParams }: { params: P
             <tr key={r.id}><td>Prescription {r.rx_number}</td><td>{fmtDateTime(r.signed_at, tenant)}</td>
               <td><form action={releaseAction.bind(null, slug, back)} className="inline-form"><input type="hidden" name="patientId" value={id} /><input type="hidden" name="kind" value="prescription" /><input type="hidden" name="docId" value={r.id} />
                 {isReleased('prescription', r.id) ? <><input type="hidden" name="op" value="revoke" /><span className="pill ok">In portal</span><button className="btn small">Remove</button></> : <button className="btn small">Release to portal</button>}</form></td></tr>))}</tbody></table></div>)}
+
+      {canIns && (
+        <div className="card"><h2>Insurance</h2>
+          {policies.length === 0 ? <Empty>No policies on file.</Empty> : <table className="table small"><tbody>{policies.map((pp) => (
+            <tr key={pp.id} className={pp.status === 'active' ? '' : 'dim'}><td><b>{pp.payer_name}</b>{pp.tpa_name ? ` via ${pp.tpa_name}` : ''}<br /><small>{pp.policy_number}{pp.member_id ? ` · member ${pp.member_id}` : ''}</small></td>
+              <td>{pp.valid_from || pp.valid_to ? `${pp.valid_from ?? '…'} → ${pp.valid_to ?? '…'}` : ''}</td>
+              <td>{pp.sum_insured_paise != null ? `${money(pp.used_paise, tenant)} of ${money(pp.sum_insured_paise, tenant)} used` : ''}{pp.copay_bp ? ` · co-pay ${pp.copay_bp / 100}%` : ''}</td>
+              <td>{payers.length > 0 && <form action={insuranceAction.bind(null, slug)}><input type="hidden" name="op" value="policyStatus" /><input type="hidden" name="id" value={pp.id} /><input type="hidden" name="active" value={pp.status === 'active' ? '0' : '1'} /><input type="hidden" name="back" value={back} />
+                <button className="btn small">{pp.status === 'active' ? 'Deactivate' : 'Activate'}</button></form>}</td></tr>))}</tbody></table>}
+          {preauths.length > 0 && <p className="small">Pre-authorisations: {preauths.map((x) => <Link key={x.id} href={`/${slug}/insurance/preauth/${x.id}`}>{x.ref_number} ({label(x.status)}) </Link>)}</p>}
+          {payers.length > 0 ? (
+            <div className="grid2">
+              <form action={insuranceAction.bind(null, slug)} className="form-grid"><input type="hidden" name="op" value="policy" /><input type="hidden" name="patientId" value={id} /><input type="hidden" name="back" value={back} />
+                <h3 className="span2">Add policy / corporate cover</h3>
+                <label>Insurer / employer<select name="payerId" required>{payers.filter((x) => x.kind !== 'tpa').map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+                <label>Through TPA<select name="tpaId"><option value="">— none —</option>{payers.filter((x) => x.kind === 'tpa').map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+                <label>Policy / card no.<input name="policyNumber" required /></label><label>Member ID<input name="memberId" /></label>
+                <label>Valid from<input type="date" name="validFrom" /></label><label>Valid to<input type="date" name="validTo" /></label>
+                <label>Sum insured (₹)<input name="sumInsured" inputMode="decimal" /></label><label>Co-pay (%)<input name="copay" defaultValue="0" inputMode="decimal" /></label>
+                <div className="span2"><button className="btn small">Add policy</button></div>
+              </form>
+              {policies.some((x) => x.status === 'active') && <form action={insuranceAction.bind(null, slug)} className="form-grid"><input type="hidden" name="op" value="preauth" /><input type="hidden" name="patientId" value={id} /><input type="hidden" name="back" value={back} />
+                <h3 className="span2">Request pre-authorisation</h3>
+                <label>Policy<select name="policyId">{policies.filter((x) => x.status === 'active').map((x) => <option key={x.id} value={x.id}>{x.payer_name} · {x.policy_number}</option>)}</select></label>
+                <label>Estimated cost (₹)<input name="estimate" required inputMode="decimal" /></label>
+                <label className="span2">Treatment / procedure<input name="treatment" required minLength={3} /></label>
+                <div className="span2"><button className="btn small">Draft request</button></div>
+              </form>}
+            </div>) : can(session.role, 'claims.manage') ? <p className="small muted">Add insurers and TPAs under <Link href={`/${slug}/insurance?tab=payers`}>Insurance › Insurers &amp; TPAs</Link> first.</p> : null}
+        </div>)}
 
       <div className="card"><h2>Referrals</h2>
         {referrals.length === 0 ? <Empty>No referrals.</Empty> : <table className="table small"><tbody>{referrals.map((r) => (
